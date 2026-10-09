@@ -1,6 +1,7 @@
 # aimon
 
-Tiny TUI that shows what your AI coding sessions (Claude Code in tmux) spawned, warns before
+Tiny TUI that shows what your terminal coding agents (Claude Code, Codex, Gemini CLI, Aider,
+OpenCode, cursor-agent, Amp, Goose, Crush, Qwen, Copilot, Droid — in tmux or not) spawned, warns before
 macOS runs out of memory, and kills the leftovers before they freeze the machine.
 
 The usual culprit: a session dies or is interrupted mid `vitest`/`jest`/`tsserver`/MCP run, the
@@ -25,7 +26,7 @@ aimon --no-auto       # never kill on its own
 
 | flag | default | |
 |---|---|---|
-| `--rss-limit-mb N` | 500 | a dev child of claude above this is a panic target |
+| `--rss-limit-mb N` | 500 | a dev child of an agent above this is a panic target |
 | `--orphan-grace-s N` | 60 | an orphaned tool worker is killed after N seconds |
 | `--tick-ms N` | 2000 | sampling interval (×2.5 when the terminal loses focus) |
 
@@ -34,13 +35,13 @@ Keys: `↑↓`/`jk` move · `x` kill selected · `X` kill the group's dev proces
 
 ## Rules
 
-- **Protected, never touched:** `claude`, `tmux`, shells, `nvim`/`vim`, iTerm2, apps in
+- **Protected, never touched:** the agents themselves, `tmux`, shells, `nvim`/`vim`, iTerm2, apps in
   `/Applications` and `/System`.
 - **Orphan tool worker** (`vitest|jest|esbuild|tsserver|playwright|mcp|pytest`, parent is
   launchd): killed automatically after the grace period, and pre-marked in panic.
 - **Orphan runtime** (`node`, `python`, `bun`, …): shown in ÓRFÃOS but never pre-marked or
   auto-killed, since it may be a daemon you started on purpose. Kill it with `x`.
-- **Heavy child of claude** (a dev process above `--rss-limit-mb`): pre-marked in panic.
+- **Heavy child of an agent** (a dev process above `--rss-limit-mb`): pre-marked in panic.
 - **Critical memory pressure** (`kern.memorystatus_vm_pressure_level`): auto mode kills the
   heaviest panic target every 10 s until pressure drops.
 

@@ -1,4 +1,4 @@
-//! Pure part: turns a flat process list into groups (orphans, tmux sessions, claude outside tmux)
+//! Pure part: turns a flat process list into groups (orphans, tmux sessions, agents outside tmux)
 //! and marks the kill targets of rule A. No I/O here, so every rule is tested with fake trees.
 use std::collections::{HashMap, HashSet};
 
@@ -6,7 +6,7 @@ use crate::sys::Proc;
 
 /// Never a target, whatever else matches.
 const PROTECTED: &[&str] = &[
-    "claude", "tmux", "fish", "zsh", "bash", "sh", "nvim", "vim", "iterm2", "login", "aimon",
+    "tmux", "fish", "zsh", "bash", "sh", "nvim", "vim", "iterm2", "login", "aimon",
 ];
 /// Workers an AI session leaves behind; auto-killed once orphaned.
 const TOOLS: &[&str] = &[
@@ -67,8 +67,41 @@ impl View {
     }
 }
 
-fn is_claude(name: &str, cmd: &str) -> bool {
-    name == "claude" || cmd.starts_with("claude") || cmd.contains("/claude/versions/")
+/// Terminal coding agents. Many run as `node …/bin/gemini` or `python …/aider`, so the first
+/// args are matched by basename too.
+const AGENTS: &[&str] = &[
+    "claude",
+    "codex",
+    "gemini",
+    "aider",
+    "opencode",
+    "cursor-agent",
+    "amp",
+    "goose",
+    "crush",
+    "qwen",
+    "copilot",
+    "droid",
+];
+
+/// The agent this process is, if any.
+pub fn agent(name: &str, cmd: &str) -> Option<&'static str> {
+    if cmd.contains("/claude/versions/") {
+        return Some("claude");
+    }
+    let base = |a: &str| a.rsplit('/').next().unwrap_or(a).to_string();
+    let name = name.to_lowercase();
+    AGENTS.iter().copied().find(|ag| {
+        name == *ag
+            || cmd
+                .split(' ')
+                .take(3)
+                .any(|a| base(a) == *ag || base(a) == format!("{ag}.js"))
+    })
+}
+
+fn is_agent(name: &str, cmd: &str) -> bool {
+    agent(name, cmd).is_some()
 }
 
 /// Apps installed in /Applications or /System (Homebrew's Python.app is not an app).
@@ -79,7 +112,7 @@ fn is_gui(cmd: &str) -> bool {
 
 pub fn kind(name: &str, cmd: &str) -> Kind {
     let name = name.to_lowercase();
-    if is_claude(&name, cmd) || PROTECTED.contains(&name.as_str()) || is_gui(cmd) {
+    if is_agent(&name, cmd) || PROTECTED.contains(&name.as_str()) || is_gui(cmd) {
         Kind::Protected
     } else if TOOLS.iter().any(|t| name.contains(t) || cmd.contains(t)) {
         Kind::Tool
@@ -91,11 +124,7 @@ pub fn kind(name: &str, cmd: &str) -> Kind {
 }
 
 fn label(p: &Proc, kind: Kind) -> String {
-    let name = if is_claude(&p.name.to_lowercase(), &p.cmd) {
-        "claude"
-    } else {
-        p.name.as_str()
-    };
+    let name = agent(&p.name, &p.cmd).unwrap_or(p.name.as_str());
     match TOOLS.iter().find(|t| p.cmd.contains(*t)) {
         Some(t) if kind == Kind::Tool && !name.contains(t) => format!("{name} ({t})"),
         _ => name.to_string(),
@@ -149,12 +178,12 @@ impl<'a> Tree<'a> {
         self.total[i]
     }
 
-    /// Depth-first rows under `i`. `orphan_root` and `under_claude` decide rule A.
+    /// Depth-first rows under `i`. `orphan_root` and `under_agent` decide rule A.
     fn walk(
         &mut self,
         i: usize,
         depth: usize,
-        under_claude: bool,
+        under_agent: bool,
         orphan_root: bool,
         out: &mut Vec<Row>,
     ) {
@@ -164,7 +193,7 @@ impl<'a> Tree<'a> {
         let p = &self.procs[i];
         let kind = self.kinds[i];
         let dev = matches!(kind, Kind::Tool | Kind::Dev);
-        let over = under_claude && p.rss > self.rss_limit;
+        let over = under_agent && p.rss > self.rss_limit;
         out.push(Row {
             pid: p.pid,
             start: p.start,
@@ -177,9 +206,9 @@ impl<'a> Tree<'a> {
             // An orphaned runtime (python, node) may be a daemon on purpose: shown, never pre-marked.
             target: (orphan_root && kind == Kind::Tool) || (dev && over),
         });
-        let claude_here = under_claude || is_claude(&p.name.to_lowercase(), &p.cmd);
+        let agent_here = under_agent || is_agent(&p.name, &p.cmd);
         for k in self.children.get(&p.pid).cloned().unwrap_or_default() {
-            self.walk(k, depth + 1, claude_here, false, out);
+            self.walk(k, depth + 1, agent_here, false, out);
         }
     }
 }
@@ -226,10 +255,10 @@ pub fn build(procs: &[Proc], tmux: &HashMap<u32, String>, rss_limit: u64) -> Vie
 
     let mut rows = Vec::new();
     for (i, p) in procs.iter().enumerate() {
-        let parent_claude = index
+        let parent_agent = index
             .get(&p.ppid)
-            .is_some_and(|j| is_claude(&procs[*j].name.to_lowercase(), &procs[*j].cmd));
-        if is_claude(&p.name.to_lowercase(), &p.cmd) && !parent_claude && !t.seen.contains(&i) {
+            .is_some_and(|j| is_agent(&procs[*j].name, &procs[*j].cmd));
+        if is_agent(&p.name, &p.cmd) && !parent_agent && !t.seen.contains(&i) {
             t.walk(i, 0, false, false, &mut rows);
         }
     }
@@ -299,6 +328,16 @@ mod tests {
             Kind::Protected
         );
         assert_eq!(kind("nvim", "nvim"), Kind::Protected);
+        assert_eq!(
+            kind("node", "node /opt/homebrew/bin/gemini"),
+            Kind::Protected
+        );
+        assert_eq!(
+            kind("python3.12", "python3.12 /u/.local/bin/aider --model x"),
+            Kind::Protected
+        );
+        assert_eq!(kind("codex", "codex"), Kind::Protected);
+        assert_eq!(kind("node", "node /x/amplify.js"), Kind::Dev);
         assert_eq!(kind("mds", "/usr/libexec/mds"), Kind::Other);
         assert_eq!(
             kind(

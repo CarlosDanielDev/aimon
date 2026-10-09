@@ -1,4 +1,4 @@
-//! aimon: watches what AI sessions spawn, alerts before the Mac runs out of memory, and kills
+//! aimon: watches what terminal coding agents spawn, alerts before the Mac runs out of memory, and kills
 //! the leftovers (orphaned test/tool workers) before they drown the machine.
 mod act;
 mod app;
@@ -19,7 +19,7 @@ uso: aimon [--daemon] [--no-auto] [--rss-limit-mb N] [--orphan-grace-s N] [--tic
 
   --daemon           sem TUI: só auto-kill e alertas
   --no-auto          não mata nada sozinho
-  --rss-limit-mb N   filho do claude acima disso vira alvo (500)
+  --rss-limit-mb N   filho de agente acima disso vira alvo (500)
   --orphan-grace-s N worker órfão é morto após N s (60)
   --tick-ms N        intervalo de amostragem (2000)";
 

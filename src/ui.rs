@@ -212,7 +212,7 @@ fn draw_panic(f: &mut Frame, th: &Theme, p: &Panic) {
             let why = if r.orphan {
                 "órfão"
             } else {
-                "filho pesado do claude"
+                "filho pesado do agente"
             };
             let line = Line::from(vec![
                 Span::styled(
