@@ -1,0 +1,78 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gate:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo build --release
+
+  # Bump `version` in Cargo.toml and push to main: this tags vX.Y.Z and publishes the release.
+  release:
+    needs: gate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: version
+        id: v
+        run: |
+          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" >/dev/null 2>&1; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "v$v already released, skipping"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.v.outputs.new == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - if: steps.v.outputs.new == 'true'
+        uses: Swatinem/rust-cache@v2
+      - name: build universal binary
+        if: steps.v.outputs.new == 'true'
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          mkdir -p dist
+          lipo -create -output dist/aimon \
+            target/aarch64-apple-darwin/release/aimon \
+            target/x86_64-apple-darwin/release/aimon
+          lipo -info dist/aimon
+          name="aimon-${{ steps.v.outputs.tag }}-macos-universal.tar.gz"
+          cp README.md dist/
+          tar -czf "dist/$name" -C dist aimon README.md
+          (cd dist && shasum -a 256 "$name" > "$name.sha256")
+      - name: tag and release
+        if: steps.v.outputs.new == 'true'
+        run: |
+          gh release create "${{ steps.v.outputs.tag }}" \
+            --target "$GITHUB_SHA" \
+            --title "${{ steps.v.outputs.tag }}" \
+            --generate-notes \
+            dist/*.tar.gz dist/*.sha256

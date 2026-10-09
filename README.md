@@ -12,8 +12,10 @@ Activity Monitor blames iTerm2.
 
 ## Install
 
+Universal macOS binary from [releases](https://github.com/CarlosDanielDev/aimon/releases/latest), or:
+
 ```sh
-cargo install --path .
+cargo install --git https://github.com/CarlosDanielDev/aimon
 ```
 
 ## Use
@@ -53,3 +55,6 @@ line to `~/.local/state/aimon/kills.log`.
 ```sh
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
+
+CI runs that gate on every push and PR. To release, bump `version` in `Cargo.toml` and push to
+`main`: CI tags `vX.Y.Z` and publishes a universal (arm64 + x86_64) binary with its sha256.
