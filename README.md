@@ -58,3 +58,7 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 
 CI runs that gate on every push and PR. To release, bump `version` in `Cargo.toml` and push to
 `main`: CI tags `vX.Y.Z` and publishes a universal (arm64 + x86_64) binary with its sha256.
+
+## License
+
+[GPL-3.0-or-later](LICENSE)

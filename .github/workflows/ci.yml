@@ -64,8 +64,8 @@ jobs:
             target/x86_64-apple-darwin/release/aimon
           lipo -info dist/aimon
           name="aimon-${{ steps.v.outputs.tag }}-macos-universal.tar.gz"
-          cp README.md dist/
-          tar -czf "dist/$name" -C dist aimon README.md
+          cp README.md LICENSE dist/
+          tar -czf "dist/$name" -C dist aimon README.md LICENSE
           (cd dist && shasum -a 256 "$name" > "$name.sha256")
       - name: tag and release
         if: steps.v.outputs.new == 'true'
