@@ -1,0 +1,28 @@
+[package]
+name = "aimon"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ratatui = "0.30"
+sysctl = "0.7"
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+todo = "deny"
+panic = "deny"
+unimplemented = "deny"
+too_many_lines = "deny"
