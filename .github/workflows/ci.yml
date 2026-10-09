@@ -16,11 +16,11 @@ jobs:
   gate:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
@@ -36,7 +36,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: version
         id: v
         run: |
@@ -49,11 +49,10 @@ jobs:
             echo "new=true" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.v.outputs.new == 'true'
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
-      - if: steps.v.outputs.new == 'true'
-        uses: Swatinem/rust-cache@v2
+      # No cache here: a poisoned cache must never reach published binaries.
       - name: build universal binary
         if: steps.v.outputs.new == 'true'
         run: |
