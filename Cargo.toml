@@ -1,6 +1,6 @@
 [package]
 name = "aimon"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "Tiny TUI that watches what terminal coding agents spawn and kills orphaned workers before macOS runs out of memory"
