@@ -3,6 +3,16 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::BorderType;
 
+/// Human-readable size: `300M`, `1.5G`.
+pub fn human(bytes: u64) -> String {
+    let mb = bytes as f64 / (1u64 << 20) as f64;
+    if mb >= 1024.0 {
+        format!("{:.1}G", mb / 1024.0)
+    } else {
+        format!("{mb:.0}M")
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
     pub matrix: bool,
@@ -92,6 +102,11 @@ impl Theme {
         }
     }
 
+    /// The cursor highlight: inverted video, same in both themes.
+    pub fn selected(self) -> Style {
+        Style::default().add_modifier(Modifier::REVERSED)
+    }
+
     pub fn border(&self) -> BorderType {
         if self.matrix {
             BorderType::Double
@@ -107,5 +122,16 @@ impl Theme {
         } else {
             ('━', '─')
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::human;
+
+    #[test]
+    fn sizes() {
+        assert_eq!(human(300 << 20), "300M");
+        assert_eq!(human(1536 << 20), "1.5G");
     }
 }

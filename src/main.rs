@@ -13,15 +13,21 @@ use std::time::{Duration, Instant};
 use ratatui::crossterm::event::{self, DisableFocusChange, EnableFocusChange, Event, KeyEventKind};
 use ratatui::crossterm::execute;
 
-const USAGE: &str = "aimon — monitor de processos da IA
+const USAGE: &str = "aimon — AI process monitor
 
-uso: aimon [--daemon] [--no-auto] [--rss-limit-mb N] [--orphan-grace-s N] [--tick-ms N]
+usage: aimon [--daemon] [--no-auto] [--rss-limit-mb N] [--orphan-grace-s N] [--tick-ms N]
 
-  --daemon           sem TUI: só auto-kill e alertas
-  --no-auto          não mata nada sozinho
-  --rss-limit-mb N   filho de agente acima disso vira alvo (500)
-  --orphan-grace-s N worker órfão é morto após N s (60)
-  --tick-ms N        intervalo de amostragem (2000)";
+  --daemon           no TUI: auto-kill and alerts only
+  --no-auto          never kills on its own
+  --rss-limit-mb N   agent child above this becomes a panic target (500)
+  --orphan-grace-s N orphaned worker is killed after N s (60)
+  --tick-ms N        sampling interval (2000)";
+
+#[derive(Debug)]
+enum CliError {
+    Help,
+    Msg(String),
+}
 
 struct Opts {
     daemon: bool,
@@ -31,7 +37,7 @@ struct Opts {
     tick: Duration,
 }
 
-fn parse(args: &[String]) -> Result<Opts, String> {
+fn parse(args: &[String]) -> Result<Opts, CliError> {
     let mut o = Opts {
         daemon: false,
         auto: true,
@@ -41,19 +47,20 @@ fn parse(args: &[String]) -> Result<Opts, String> {
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        let mut num = |name: &str| -> Result<u64, String> {
+        let mut num = |name: &str| -> Result<u64, CliError> {
             it.next()
                 .and_then(|v| v.parse().ok())
-                .ok_or(format!("{name} precisa de um número"))
+                .ok_or_else(|| CliError::Msg(format!("{name} needs a number")))
         };
         match a.as_str() {
             "--daemon" => o.daemon = true,
             "--no-auto" => o.auto = false,
-            "--rss-limit-mb" => o.rss_limit = num(a)? << 20,
-            "--orphan-grace-s" => o.grace = Duration::from_secs(num(a)?),
+            // A 0 here would mean "every child is a target"; a huge N must not shift-overflow.
+            "--rss-limit-mb" => o.rss_limit = num(a)?.max(1).checked_shl(20).unwrap_or(u64::MAX),
+            "--orphan-grace-s" => o.grace = Duration::from_secs(num(a)?.max(1)),
             "--tick-ms" => o.tick = Duration::from_millis(num(a)?.max(250)),
-            "-h" | "--help" => return Err(USAGE.into()),
-            other => return Err(format!("opção desconhecida: {other}\n\n{USAGE}")),
+            "-h" | "--help" => return Err(CliError::Help),
+            other => return Err(CliError::Msg(format!("unknown option: {other}\n\n{USAGE}"))),
         }
     }
     Ok(o)
@@ -63,7 +70,11 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let opts = match parse(&args) {
         Ok(o) => o,
-        Err(msg) => {
+        Err(CliError::Help) => {
+            println!("{USAGE}");
+            return;
+        }
+        Err(CliError::Msg(msg)) => {
             eprintln!("{msg}");
             std::process::exit(2);
         }
@@ -97,6 +108,9 @@ fn tui(o: &Opts) -> io::Result<()> {
     let result = run(&mut term, &mut app, o.tick);
     let _ = execute!(io::stdout(), DisableFocusChange);
     ratatui::restore();
+    // A TERM may not have landed yet and no next tick is coming: finish the job on every
+    // exit path, error or not.
+    app.actor.escalate_now(&mut app.sampler);
     result
 }
 
@@ -127,7 +141,7 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut app::App, tick: Duration) 
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::{CliError, parse};
 
     fn args(s: &str) -> Vec<String> {
         s.split_whitespace().map(String::from).collect()
@@ -144,5 +158,17 @@ mod tests {
         assert_eq!(o.grace.as_secs(), 5);
         assert!(parse(&args("--rss-limit-mb")).is_err());
         assert!(parse(&args("--wat")).is_err());
+    }
+
+    #[test]
+    fn dangerous_zeros_are_floored() {
+        let o = parse(&args("--rss-limit-mb 0 --orphan-grace-s 0")).expect("ok");
+        assert_eq!(o.rss_limit, 1 << 20, "0 would target every child");
+        assert_eq!(o.grace.as_secs(), 1, "0 would kill orphans instantly");
+    }
+
+    #[test]
+    fn help_is_not_an_error() {
+        assert!(matches!(parse(&args("--help")), Err(CliError::Help)));
     }
 }

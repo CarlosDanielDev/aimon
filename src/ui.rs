@@ -1,15 +1,13 @@
 //! Drawing only. Ratatui diffs the buffer, so an unchanged frame writes nothing to the terminal.
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use crate::act::human;
 use crate::app::{App, Panic};
 use crate::classify::{Group, Kind, Row};
 use crate::sys::Pressure;
-use crate::theme::Theme;
+use crate::theme::{Theme, human};
 
 const GB: u64 = 1 << 30;
 
@@ -33,7 +31,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" aimon ", th.bold(th.brand)),
-            Span::styled("· processos da IA ", th.muted()),
+            Span::styled("· AI processes ", th.muted()),
             Span::styled(auto.0, th.bold(auto.1)),
         ])),
         title,
@@ -47,7 +45,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     );
     f.render_widget(
         Paragraph::new(Span::styled(
-            " ↑↓ navegar · x matar · X matar grupo · p panic · a auto · t tema · q sair",
+            " ↑↓ navigate · x kill · X kill group · p panic · a auto · t theme · q quit",
             th.muted(),
         )),
         keys,
@@ -55,6 +53,11 @@ pub fn draw(f: &mut Frame, app: &App) {
     if let Some(p) = &app.panic {
         draw_panic(f, th, p);
     }
+}
+
+/// Scroll offset that keeps `sel` visible inside a `visible`-line window.
+fn scroll_top(sel: usize, visible: usize) -> u16 {
+    u16::try_from(sel.saturating_sub(visible.saturating_sub(1))).unwrap_or(u16::MAX)
 }
 
 fn bar(th: &Theme, used: u64, total: u64, width: u16) -> Line<'static> {
@@ -94,27 +97,34 @@ fn draw_gauges(f: &mut Frame, app: &App, area: Rect) {
     let m = &app.mem;
     let cols = Layout::horizontal([Constraint::Fill(1); 3]).split(area);
     let inner = cols[0].width.saturating_sub(2);
-    f.render_widget(
-        Paragraph::new(bar(th, m.used, m.total, inner)).block(panel(th, "RAM")),
-        cols[0],
-    );
-    f.render_widget(
-        Paragraph::new(bar(th, m.swap_used, m.swap_total, inner)).block(panel(th, "swap")),
-        cols[1],
-    );
-    let (glyph, text, color) = match m.pressure {
-        Pressure::Normal => ("●", "normal", th.ok),
-        Pressure::Warn => ("▲", "warn", th.warn),
-        Pressure::Critical => ("✖", "CRÍTICA", th.bad),
+    for (i, (title, used, total)) in [
+        ("RAM", m.used, m.total),
+        ("swap", m.swap_used, m.swap_total),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        f.render_widget(
+            Paragraph::new(bar(th, used, total, inner)).block(panel(th, title)),
+            cols[i],
+        );
+    }
+    let (glyph, color) = match m.pressure {
+        Pressure::Normal => ("●", th.ok),
+        Pressure::Warn => ("▲", th.warn),
+        Pressure::Critical => ("✖", th.bad),
     };
     f.render_widget(
-        Paragraph::new(Span::styled(format!("{glyph} {text}"), th.bold(color)))
-            .block(panel(th, "pressão")),
+        Paragraph::new(Span::styled(
+            format!("{glyph} {}", m.pressure.label()),
+            th.bold(color),
+        ))
+        .block(panel(th, "pressure")),
         cols[2],
     );
 }
 
-fn rss_style(th: &Theme, rss: u64) -> Style {
+fn rss_style(th: &Theme, rss: u64) -> ratatui::style::Style {
     if rss >= GB {
         th.bold(th.bad)
     } else if rss >= GB / 2 {
@@ -125,11 +135,11 @@ fn rss_style(th: &Theme, rss: u64) -> Style {
 }
 
 fn row_line(th: &Theme, r: &Row, width: usize, selected: bool) -> Line<'static> {
-    let (glyph, color) = match (r.target, r.orphan, r.kind) {
+    let (glyph, color) = match (r.why.is_some(), r.orphan, r.kind) {
         (true, _, _) => ("✖", th.bad),
         (_, true, _) => ("○", th.warn),
         (_, _, Kind::Protected) => ("◆", th.accent),
-        (_, _, Kind::Tool | Kind::Dev) => ("·", th.value),
+        (_, _, k) if k.is_dev() => ("·", th.value),
         _ => ("·", th.muted),
     };
     let indent = "  ".repeat(r.depth.min(8));
@@ -144,7 +154,7 @@ fn row_line(th: &Theme, r: &Row, width: usize, selected: bool) -> Line<'static> 
         Span::styled(format!(" {:>7}", r.pid), th.muted()),
     ]);
     if selected {
-        line = line.style(Style::default().add_modifier(ratatui::style::Modifier::REVERSED));
+        line = line.style(th.selected());
     }
     line
 }
@@ -154,7 +164,7 @@ fn group_line(th: &Theme, g: &Group) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!(" ▌{} ", g.title), th.bold(color)),
         Span::styled(
-            format!("{} · {} procs", human(g.rss), g.rows.len()),
+            format!("{} · {} procs", human(g.rss()), g.rows.len()),
             th.muted(),
         ),
     ])
@@ -163,29 +173,33 @@ fn group_line(th: &Theme, g: &Group) -> Line<'static> {
 fn draw_tree(f: &mut Frame, app: &App, area: Rect) {
     let th = &app.theme;
     let width = usize::from(area.width.saturating_sub(2));
-    let mut lines = Vec::new();
-    let mut sel_line = 0;
+    let h = usize::from(area.height.saturating_sub(2));
+    let sel_line = app.view.line_of(app.sel);
+    let top = scroll_top(sel_line, h) as usize;
+    // Only the visible window is formatted; `at` counts lines whether or not they are drawn.
+    let mut lines = Vec::with_capacity(h);
+    let mut at = 0;
     let mut i = 0;
     for g in &app.view.groups {
-        lines.push(group_line(th, g));
+        if at >= top && lines.len() < h {
+            lines.push(group_line(th, g));
+        }
+        at += 1;
         for r in &g.rows {
-            if i == app.sel {
-                sel_line = lines.len();
+            if at >= top && lines.len() < h {
+                lines.push(row_line(th, r, width, i == app.sel));
             }
-            lines.push(row_line(th, r, width, i == app.sel));
+            at += 1;
             i += 1;
         }
     }
     if lines.is_empty() {
-        lines.push(Line::styled(" nenhum processo de IA à vista", th.muted()));
+        lines.push(Line::styled(" no AI processes in sight", th.muted()));
     }
-    let h = usize::from(area.height.saturating_sub(2));
-    let top = sel_line.saturating_sub(h.saturating_sub(1));
-    let top = u16::try_from(top).unwrap_or(u16::MAX);
     f.render_widget(
         Paragraph::new(lines)
-            .scroll((top, 0))
-            .block(panel(th, "processos")),
+            .scroll((top as u16, 0))
+            .block(panel(th, "processes")),
         area,
     );
 }
@@ -209,10 +223,11 @@ fn draw_panic(f: &mut Frame, th: &Theme, p: &Panic) {
         .enumerate()
         .map(|(i, (r, on))| {
             let mark = if *on { "[✖]" } else { "[ ]" };
-            let why = if r.orphan {
-                "órfão"
+            let kids = r.subtree.saturating_sub(r.rss);
+            let extra = if kids > 0 {
+                format!(" · +{} subtree", human(kids))
             } else {
-                "filho pesado do agente"
+                String::new()
             };
             let line = Line::from(vec![
                 Span::styled(
@@ -221,26 +236,31 @@ fn draw_panic(f: &mut Frame, th: &Theme, p: &Panic) {
                 ),
                 Span::styled(format!("{:>7} ", human(r.rss)), rss_style(th, r.rss)),
                 Span::styled(format!("{} ", r.label), th.fg(th.text)),
-                Span::styled(format!("pid {} · {why}", r.pid), th.muted()),
+                Span::styled(
+                    format!("pid {} · {}{extra}", r.pid, r.why.unwrap_or("picked")),
+                    th.muted(),
+                ),
             ]);
             if i == p.sel {
-                line.style(Style::default().add_modifier(ratatui::style::Modifier::REVERSED))
+                line.style(th.selected())
             } else {
                 line
             }
         })
         .collect();
     lines.push(Line::styled(
-        format!(" space marca · enter mata ({}) · esc cancela", human(total)),
+        format!(
+            " space toggles · enter kills ({}) · esc cancels",
+            human(total)
+        ),
         th.fg(th.warn),
     ));
     let visible = usize::from(h.saturating_sub(3));
-    let top = u16::try_from(p.sel.saturating_sub(visible.saturating_sub(1))).unwrap_or(0);
     f.render_widget(Clear, area);
     f.render_widget(
         Paragraph::new(lines)
-            .scroll((top, 0))
-            .block(panel(th, "PANIC").border_style(th.fg(th.bad)))
+            .scroll((scroll_top(p.sel, visible), 0))
+            .block(panel(th, p.title).border_style(th.fg(th.bad)))
             .style(th.ground()),
         area,
     );

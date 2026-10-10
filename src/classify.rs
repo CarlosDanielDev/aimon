@@ -1,6 +1,6 @@
 //! Pure part: turns a flat process list into groups (orphans, tmux sessions, agents outside tmux)
 //! and marks the kill targets of rule A. No I/O here, so every rule is tested with fake trees.
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::sys::Proc;
 
@@ -29,6 +29,13 @@ pub enum Kind {
     Other,
 }
 
+impl Kind {
+    /// Spawned on purpose by a dev session (test runners, build tools, runtimes).
+    pub fn is_dev(self) -> bool {
+        matches!(self, Kind::Tool | Kind::Dev)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Row {
     pub pid: u32,
@@ -40,16 +47,31 @@ pub struct Row {
     pub kind: Kind,
     /// Root of an orphaned dev tree (parent is launchd).
     pub orphan: bool,
-    /// Rule A: pre-marked in the panic popup.
-    pub target: bool,
+    /// RSS of the whole subtree rooted here: what killing this row takes down.
+    pub subtree: u64,
+    /// Rule A: why this row is pre-marked in the panic popup, if it is.
+    pub why: Option<&'static str>,
+}
+
+impl Row {
+    /// Rule A orphan half: an orphaned tool worker, auto-killed after the grace period.
+    pub fn is_orphan_tool(&self) -> bool {
+        self.orphan && self.kind == Kind::Tool
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Group {
     pub title: String,
     pub orphans: bool,
-    pub rss: u64,
     pub rows: Vec<Row>,
+}
+
+impl Group {
+    /// Always the sum of the rows, so it can never drift from them.
+    pub fn rss(&self) -> u64 {
+        self.rows.iter().map(|r| r.rss).sum()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -63,12 +85,38 @@ impl View {
     }
 
     pub fn targets(&self) -> Vec<Row> {
-        self.rows().filter(|r| r.target).cloned().collect()
+        self.rows().filter(|r| r.why.is_some()).cloned().collect()
+    }
+
+    /// The group holding flat row `i` (the order `rows()` yields), and the row's index in it.
+    pub fn locate(&self, i: usize) -> Option<(&Group, usize)> {
+        let mut seen = 0;
+        for g in &self.groups {
+            if seen + g.rows.len() > i {
+                return Some((g, i - seen));
+            }
+            seen += g.rows.len();
+        }
+        None
+    }
+
+    /// Screen lines printed above flat row `i`: one header per group plus the rows before it.
+    pub fn line_of(&self, i: usize) -> usize {
+        let (mut lines, mut seen) = (0, 0);
+        for g in &self.groups {
+            if seen + g.rows.len() > i {
+                return lines + 1 + (i - seen);
+            }
+            lines += 1 + g.rows.len();
+            seen += g.rows.len();
+        }
+        lines
     }
 }
 
 /// Terminal coding agents. Many run as `node …/bin/gemini` or `python …/aider`, so the first
-/// args are matched by basename too.
+/// args are matched by basename too, and versioned installs (`…/claude/versions/2.1.294`) by
+/// their directory segment — a binary whose basename is the version number.
 const AGENTS: &[&str] = &[
     "claude",
     "codex",
@@ -86,22 +134,34 @@ const AGENTS: &[&str] = &[
 
 /// The agent this process is, if any.
 pub fn agent(name: &str, cmd: &str) -> Option<&'static str> {
-    if cmd.contains("/claude/versions/") {
-        return Some("claude");
-    }
-    let base = |a: &str| a.rsplit('/').next().unwrap_or(a).to_string();
     let name = name.to_lowercase();
     AGENTS.iter().copied().find(|ag| {
         name == *ag
-            || cmd
-                .split(' ')
-                .take(3)
-                .any(|a| base(a) == *ag || base(a) == format!("{ag}.js"))
+            || cmd.split(' ').take(3).any(|a| {
+                let b = last_seg(a);
+                b == *ag || b.strip_suffix(".js") == Some(*ag) || agent_dir(ag, a)
+            })
     })
 }
 
-fn is_agent(name: &str, cmd: &str) -> bool {
-    agent(name, cmd).is_some()
+fn last_seg(a: &str) -> &str {
+    a.rsplit('/').next().unwrap_or(a)
+}
+
+/// A path segment named `ag` leading into a version — `claude/versions/2.1.294`,
+/// `codex/1.2.3` — how versioned agent installs look. A bare directory that merely shares an
+/// agent's name (`proj/amp/server.js`, `claude/config.json`) is not an agent.
+fn agent_dir(ag: &str, a: &str) -> bool {
+    let version_like = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || c == '.');
+    let (mut prev, mut prev2) = ("", "");
+    for s in a.split('/') {
+        if (prev == ag && version_like(s)) || (prev == "versions" && version_like(s) && prev2 == ag)
+        {
+            return true;
+        }
+        (prev2, prev) = (prev, s);
+    }
+    false
 }
 
 /// Apps installed in /Applications or /System (Homebrew's Python.app is not an app).
@@ -110,11 +170,25 @@ fn is_gui(cmd: &str) -> bool {
         && cmd.contains(".app/contents/")
 }
 
+/// The tool from TOOLS this process runs, if any.
+fn tool_match(name: &str, cmd: &str) -> Option<&'static str> {
+    TOOLS
+        .iter()
+        .copied()
+        .find(|t| name.contains(t) || cmd.contains(t))
+}
+
+/// Test-facing form of the classification; production resolves the agent once in `Tree::new`.
+#[cfg(test)]
 pub fn kind(name: &str, cmd: &str) -> Kind {
+    kind_of(name, cmd, agent(name, cmd))
+}
+
+fn kind_of(name: &str, cmd: &str, agent: Option<&'static str>) -> Kind {
     let name = name.to_lowercase();
-    if is_agent(&name, cmd) || PROTECTED.contains(&name.as_str()) || is_gui(cmd) {
+    if agent.is_some() || PROTECTED.contains(&name.as_str()) || is_gui(cmd) {
         Kind::Protected
-    } else if TOOLS.iter().any(|t| name.contains(t) || cmd.contains(t)) {
+    } else if tool_match(&name, cmd).is_some() {
         Kind::Tool
     } else if RUNTIMES.contains(&name.as_str()) || name.starts_with("python") {
         Kind::Dev
@@ -123,10 +197,13 @@ pub fn kind(name: &str, cmd: &str) -> Kind {
     }
 }
 
-fn label(p: &Proc, kind: Kind) -> String {
-    let name = agent(&p.name, &p.cmd).unwrap_or(p.name.as_str());
-    match TOOLS.iter().find(|t| p.cmd.contains(*t)) {
-        Some(t) if kind == Kind::Tool && !name.contains(t) => format!("{name} ({t})"),
+fn label(agent: Option<&'static str>, kind: Kind, p: &Proc) -> String {
+    let name = agent.unwrap_or(p.name.as_str());
+    match (kind == Kind::Tool)
+        .then(|| tool_match(&p.name, &p.cmd))
+        .flatten()
+    {
+        Some(t) if !name.contains(t) => format!("{name} ({t})"),
         _ => name.to_string(),
     }
 }
@@ -134,8 +211,10 @@ fn label(p: &Proc, kind: Kind) -> String {
 struct Tree<'a> {
     procs: &'a [Proc],
     kinds: Vec<Kind>,
+    agents: Vec<Option<&'static str>>,
     children: HashMap<u32, Vec<usize>>,
     total: Vec<u64>,
+    done: Vec<bool>,
     seen: HashSet<usize>,
     rss_limit: u64,
 }
@@ -146,11 +225,21 @@ impl<'a> Tree<'a> {
         for (i, p) in procs.iter().enumerate() {
             children.entry(p.ppid).or_default().push(i);
         }
+        // Agent identity resolved once per process; kind, label, walk and build all read it.
+        let agents: Vec<Option<&'static str>> =
+            procs.iter().map(|p| agent(&p.name, &p.cmd)).collect();
+        let kinds: Vec<Kind> = procs
+            .iter()
+            .zip(&agents)
+            .map(|(p, a)| kind_of(&p.name, &p.cmd, *a))
+            .collect();
         let mut t = Self {
             procs,
-            kinds: procs.iter().map(|p| kind(&p.name, &p.cmd)).collect(),
+            kinds,
+            agents,
             children,
             total: vec![0; procs.len()],
+            done: vec![false; procs.len()],
             seen: HashSet::new(),
             rss_limit,
         };
@@ -164,7 +253,7 @@ impl<'a> Tree<'a> {
     }
 
     fn subtree_rss(&mut self, i: usize, guard: usize) -> u64 {
-        if self.total[i] > 0 || guard > 64 {
+        if self.done[i] || guard > 64 {
             return self.total[i];
         }
         let pid = self.procs[i].pid;
@@ -175,6 +264,7 @@ impl<'a> Tree<'a> {
             .map(|k| self.subtree_rss(*k, guard + 1))
             .sum::<u64>();
         self.total[i] = self.procs[i].rss + sum;
+        self.done[i] = true;
         self.total[i]
     }
 
@@ -192,21 +282,29 @@ impl<'a> Tree<'a> {
         }
         let p = &self.procs[i];
         let kind = self.kinds[i];
-        let dev = matches!(kind, Kind::Tool | Kind::Dev);
         let over = under_agent && p.rss > self.rss_limit;
-        out.push(Row {
+        let mut row = Row {
             pid: p.pid,
             start: p.start,
             depth,
-            label: label(p, kind),
+            label: label(self.agents[i], kind, p),
             rss: p.rss,
             cpu: p.cpu,
             kind,
             orphan: orphan_root,
-            // An orphaned runtime (python, node) may be a daemon on purpose: shown, never pre-marked.
-            target: (orphan_root && kind == Kind::Tool) || (dev && over),
-        });
-        let agent_here = under_agent || is_agent(&p.name, &p.cmd);
+            subtree: self.total[i],
+            why: None,
+        };
+        // An orphaned runtime (python, node) may be a daemon on purpose: shown, never pre-marked.
+        row.why = if row.is_orphan_tool() {
+            Some("orphan")
+        } else if kind.is_dev() && over {
+            Some("heavy agent child")
+        } else {
+            None
+        };
+        out.push(row);
+        let agent_here = under_agent || self.agents[i].is_some();
         for k in self.children.get(&p.pid).cloned().unwrap_or_default() {
             self.walk(k, depth + 1, agent_here, false, out);
         }
@@ -214,10 +312,9 @@ impl<'a> Tree<'a> {
 }
 
 fn group(title: String, orphans: bool, rows: Vec<Row>) -> Option<Group> {
-    (!rows.is_empty()).then(|| Group {
+    (!rows.is_empty()).then_some(Group {
         title,
         orphans,
-        rss: rows.iter().map(|r| r.rss).sum(),
         rows,
     })
 }
@@ -230,18 +327,17 @@ pub fn build(procs: &[Proc], tmux: &HashMap<u32, String>, rss_limit: u64) -> Vie
 
     let mut rows = Vec::new();
     for (i, p) in procs.iter().enumerate() {
-        if p.ppid == 1 && matches!(t.kinds[i], Kind::Tool | Kind::Dev) {
+        if p.ppid == 1 && t.kinds[i].is_dev() {
             t.walk(i, 0, false, true, &mut rows);
         }
     }
-    groups.extend(group("ÓRFÃOS".into(), true, rows));
+    groups.extend(group("ORPHANS".into(), true, rows));
 
-    let mut sessions: Vec<(&String, Vec<usize>)> = Vec::new();
+    // Session-name keyed and sorted, so group order never flips when pane order drifts.
+    let mut sessions: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     for (pane, name) in tmux {
-        let Some(&i) = index.get(pane) else { continue };
-        match sessions.iter_mut().find(|(n, _)| *n == name) {
-            Some((_, list)) => list.push(i),
-            None => sessions.push((name, vec![i])),
+        if let Some(&i) = index.get(pane) {
+            sessions.entry(name.as_str()).or_default().push(i);
         }
     }
     let mut tail = Vec::new();
@@ -255,15 +351,13 @@ pub fn build(procs: &[Proc], tmux: &HashMap<u32, String>, rss_limit: u64) -> Vie
 
     let mut rows = Vec::new();
     for (i, p) in procs.iter().enumerate() {
-        let parent_agent = index
-            .get(&p.ppid)
-            .is_some_and(|j| is_agent(&procs[*j].name, &procs[*j].cmd));
-        if is_agent(&p.name, &p.cmd) && !parent_agent && !t.seen.contains(&i) {
+        let parent_agent = index.get(&p.ppid).is_some_and(|j| t.agents[*j].is_some());
+        if t.agents[i].is_some() && !parent_agent && !t.seen.contains(&i) {
             t.walk(i, 0, false, false, &mut rows);
         }
     }
-    tail.extend(group("fora do tmux".into(), false, rows));
-    tail.sort_by_key(|g| std::cmp::Reverse(g.rss));
+    tail.extend(group("outside tmux".into(), false, rows));
+    tail.sort_by_key(|g| std::cmp::Reverse(g.rss()));
     groups.extend(tail);
     View { groups }
 }
@@ -349,19 +443,53 @@ mod tests {
     }
 
     #[test]
+    fn agent_paths() {
+        // Versioned install: matched by its directory segment, at any argv position.
+        assert_eq!(
+            agent("2.1.294", "/u/.local/share/claude/versions/2.1.294"),
+            Some("claude")
+        );
+        assert_eq!(
+            agent(
+                "node",
+                "node --max-old-space-size=4096 /users/x/.local/share/claude/versions/2.1.294"
+            ),
+            Some("claude")
+        );
+        assert_eq!(
+            agent("node", "node /opt/codex/1.2.3/bin/run.js"),
+            Some("codex")
+        );
+        // A directory that merely shares an agent's name is not an agent.
+        assert_eq!(agent("node", "node /home/me/proj/amp/server.js"), None);
+        assert_eq!(agent("node", "node /x/claude/config.json"), None);
+        // User data paths in later args never make a process an agent.
+        assert_eq!(
+            agent("node", "node /x/serve.js /users/c/.claude/x.json"),
+            None
+        );
+        // A bare name still matches, and no agent anywhere matches nothing.
+        assert_eq!(agent("codex", "codex"), Some("codex"));
+        assert_eq!(agent("mds", "/usr/libexec/mds"), None);
+    }
+
+    #[test]
     fn orphans_first_and_marked() {
         let (procs, tmux) = sample();
         let v = build(&procs, &tmux, 500 * MB);
         let first = &v.groups[0];
         assert!(first.orphans);
+        assert_eq!(first.rss(), 1500 * MB);
         let pids: Vec<u32> = first.rows.iter().map(|r| r.pid).collect();
         assert_eq!(pids, vec![50, 51, 60]);
-        assert!(first.rows[0].target && first.rows[0].orphan);
+        assert!(first.rows[0].orphan);
+        assert_eq!(first.rows[0].why, Some("orphan"));
+        assert_eq!(first.rows[0].subtree, 1300 * MB, "subtree covers the child");
         assert!(
-            !first.rows[2].target,
+            first.rows[2].why.is_none(),
             "orphan dev server is shown, not pre-marked"
         );
-        assert!(!first.rows[1].target, "child dies with its root");
+        assert!(!first.rows[1].orphan, "child dies with its root");
     }
 
     #[test]
@@ -373,7 +501,12 @@ mod tests {
             .iter()
             .find(|g| g.title == "tmux:projects")
             .expect("tmux group");
-        let t: Vec<u32> = tm.rows.iter().filter(|r| r.target).map(|r| r.pid).collect();
+        let t: Vec<u32> = tm
+            .rows
+            .iter()
+            .filter(|r| r.why.is_some())
+            .map(|r| r.pid)
+            .collect();
         assert_eq!(t, vec![40]);
         assert_eq!(
             tm.rows
@@ -391,7 +524,7 @@ mod tests {
         assert!(
             v.rows()
                 .filter(|r| r.kind == Kind::Protected)
-                .all(|r| !r.target)
+                .all(|r| r.why.is_none())
         );
         assert!(v.rows().all(|r| r.pid != 70), "orphan nvim is not shown");
     }
@@ -403,7 +536,23 @@ mod tests {
         assert!(
             v.groups
                 .iter()
-                .any(|g| g.title == "fora do tmux" && g.rows[0].pid == 80)
+                .any(|g| g.title == "outside tmux" && g.rows[0].pid == 80)
         );
+    }
+
+    #[test]
+    fn flat_index_mapping() {
+        let (procs, tmux) = sample();
+        let v = build(&procs, &tmux, 500 * MB);
+        // locate() and line_of() agree with the flat order rows() yields: every group costs
+        // one header line, every row one line.
+        let mut expect_line = 1;
+        for (i, row) in v.rows().enumerate() {
+            let (g, at) = v.locate(i).expect("in range");
+            assert!(std::ptr::eq(&g.rows[at], row));
+            assert_eq!(v.line_of(i), expect_line, "flat {i}");
+            expect_line += if at + 1 == g.rows.len() { 2 } else { 1 };
+        }
+        assert!(v.locate(v.rows().count()).is_none());
     }
 }

@@ -9,21 +9,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sysinfo::Signal;
 
-use crate::classify::{Kind, Row, View};
+use crate::classify::{Row, View};
 use crate::sys::{Mem, Pressure, Proc, Sampler};
+use crate::theme::human;
 
 const KILL_AFTER: Duration = Duration::from_secs(2);
 const CRITICAL_COOLDOWN: Duration = Duration::from_secs(10);
 const EVENTS: usize = 50;
-
-pub fn human(bytes: u64) -> String {
-    let mb = bytes as f64 / (1u64 << 20) as f64;
-    if mb >= 1024.0 {
-        format!("{:.1}G", mb / 1024.0)
-    } else {
-        format!("{mb:.0}M")
-    }
-}
 
 struct Pending {
     pid: u32,
@@ -75,8 +67,8 @@ impl Actor {
         if mem.pressure != self.last_pressure {
             if mem.pressure != Pressure::Normal {
                 let msg = format!(
-                    "pressão {:?}: RAM {}/{} swap {}",
-                    mem.pressure,
+                    "pressure {}: RAM {}/{} swap {}",
+                    mem.pressure.label(),
                     human(mem.used),
                     human(mem.total),
                     human(mem.swap_used)
@@ -86,13 +78,12 @@ impl Actor {
             }
             self.last_pressure = mem.pressure;
         }
-        let orphans: HashSet<(u32, u64)> = view
-            .rows()
-            .filter(|r| r.orphan && r.kind == Kind::Tool)
-            .map(|r| (r.pid, r.start))
-            .collect();
-        self.first_seen.retain(|k, _| orphans.contains(k));
-        for k in &orphans {
+        // Rule A orphans: exactly the rows the panic popup pre-marks. One collection drives both
+        // the grace bookkeeping and the auto-kill list, so the two can never drift apart.
+        let orphans: Vec<&Row> = view.rows().filter(|r| r.is_orphan_tool()).collect();
+        let seen: HashSet<(u32, u64)> = orphans.iter().map(|r| (r.pid, r.start)).collect();
+        self.first_seen.retain(|k, _| seen.contains(k));
+        for k in &seen {
             self.first_seen.entry(*k).or_insert_with(Instant::now);
         }
         if !self.auto {
@@ -106,29 +97,37 @@ impl Actor {
             self.last_critical = Some(Instant::now());
         }
         let grace = self.grace;
-        let mut due: Vec<(Row, &str)> = view
-            .rows()
-            .filter(|r| r.orphan && r.kind == Kind::Tool)
+        let mut due: Vec<(&Row, &str)> = orphans
+            .into_iter()
             .filter(|r| {
                 self.first_seen
                     .get(&(r.pid, r.start))
                     .is_some_and(|t| t.elapsed() >= grace)
             })
-            .map(|r| (r.clone(), "auto: órfão"))
+            .map(|r| (r, "auto: orphan"))
             .collect();
         // ponytail: critical kills only the heaviest target per cooldown, so a running test or
         // build is lost only while pressure stays critical.
-        if critical && let Some(r) = view.targets().into_iter().max_by_key(|r| r.rss) {
-            due.push((r, "auto: pressão crítica"));
+        if critical
+            && let Some(r) = view
+                .rows()
+                .filter(|r| r.why.is_some())
+                .max_by_key(|r| r.rss)
+        {
+            due.push((r, "auto: critical pressure"));
         }
-        for (r, why) in due {
-            self.kill_tree(s, procs, &r, why);
+        for (r, why) in &due {
+            self.kill_tree(s, procs, r, why);
         }
         self.flush();
     }
 
     /// TERM to `row` and every descendant; KILL follows in `KILL_AFTER` for any survivor.
     pub fn kill_tree(&mut self, s: &Sampler, procs: &[Proc], row: &Row, why: &str) {
+        let kids: HashMap<u32, Vec<&Proc>> = procs.iter().fold(HashMap::new(), |mut m, p| {
+            m.entry(p.ppid).or_default().push(p);
+            m
+        });
         let mut stack = vec![(row.pid, row.start)];
         let mut total = 0u64;
         let mut seen = HashSet::new();
@@ -143,9 +142,11 @@ impl Actor {
                     at: Instant::now(),
                 });
             }
-            for c in procs.iter().filter(|p| p.ppid == pid) {
-                total += c.rss;
-                stack.push((c.pid, c.start));
+            if let Some(children) = kids.get(&pid) {
+                for c in children {
+                    total += c.rss;
+                    stack.push((c.pid, c.start));
+                }
             }
         }
         self.first_seen.remove(&(row.pid, row.start));
@@ -172,12 +173,28 @@ impl Actor {
         });
     }
 
+    /// Finish pending kills on the way out: honor the remaining TERM grace, then KILL any
+    /// survivor. Called where no next tick exists to do it. Refreshes the sampler first so a
+    /// just-reused pid is never mistaken for the process that was killed.
+    pub fn escalate_now(&mut self, s: &mut Sampler) {
+        s.refresh();
+        for p in std::mem::take(&mut self.pending) {
+            let due = p.at + KILL_AFTER;
+            while Instant::now() < due && s.alive(p.pid, p.start) {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            if s.alive(p.pid, p.start) {
+                s.signal(p.pid, p.start, Signal::Kill);
+            }
+        }
+    }
+
     /// One notification per batch of kills, not one per process.
     pub fn flush(&mut self) {
         match self.batch.len() {
             0 => {}
             1 => notify(&self.batch[0]),
-            n => notify(&format!("{n} processos mortos · {}", self.batch[0])),
+            n => notify(&format!("{n} processes killed · {}", self.batch[0])),
         }
         self.batch.clear();
     }
@@ -202,15 +219,4 @@ fn notify(msg: &str) {
     std::thread::spawn(move || {
         let _ = Command::new("osascript").args(["-e", &script]).status();
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::human;
-
-    #[test]
-    fn sizes() {
-        assert_eq!(human(300 << 20), "300M");
-        assert_eq!(human(1536 << 20), "1.5G");
-    }
 }

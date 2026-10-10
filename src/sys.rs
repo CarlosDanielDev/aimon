@@ -1,9 +1,10 @@
 //! Reads the machine: processes of the current user, RAM, swap, the kernel's memory pressure
 //! level and which tmux session owns which pane. Only what the view needs is refreshed.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+use sysctl::Sysctl;
 use sysinfo::{
     MemoryRefreshKind, Pid, ProcessRefreshKind, ProcessesToUpdate, Signal, System, Uid, UpdateKind,
 };
@@ -39,6 +40,15 @@ impl Pressure {
             _ => Pressure::Normal,
         }
     }
+
+    /// One label shared by the banner, the log and the gauge.
+    pub fn label(self) -> &'static str {
+        match self {
+            Pressure::Normal => "normal",
+            Pressure::Warn => "warn",
+            Pressure::Critical => "CRITICAL",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -56,6 +66,9 @@ pub struct Sampler {
     me: u32,
     pub tmux: HashMap<u32, String>,
     tmux_at: Option<Instant>,
+    /// pid -> (start time, capped lowercase cmdline). The cmdline never changes; only the pid can.
+    cmds: HashMap<u32, (u64, String)>,
+    pressure_ctl: Option<sysctl::Ctl>,
 }
 
 impl Sampler {
@@ -66,6 +79,8 @@ impl Sampler {
             me: std::process::id(),
             tmux: HashMap::new(),
             tmux_at: None,
+            cmds: HashMap::new(),
+            pressure_ctl: sysctl::Ctl::new("kern.memorystatus_vm_pressure_level").ok(),
         };
         s.refresh();
         s.uid = s
@@ -75,7 +90,7 @@ impl Sampler {
         s
     }
 
-    fn refresh(&mut self) {
+    pub(crate) fn refresh(&mut self) {
         let kind = ProcessRefreshKind::nothing()
             .with_memory()
             .with_cpu()
@@ -93,28 +108,46 @@ impl Sampler {
             self.tmux = tmux_panes();
             self.tmux_at = Some(Instant::now());
         }
-        let procs = self
+        let procs: Vec<Proc> = self
             .sys
             .processes()
             .values()
             .filter(|p| p.pid().as_u32() != self.me)
             .filter(|p| self.uid.is_none() || p.user_id() == self.uid.as_ref())
-            .map(|p| Proc {
-                pid: p.pid().as_u32(),
-                ppid: p.parent().map_or(0, Pid::as_u32),
-                name: p.name().to_string_lossy().into_owned(),
-                cmd: cmdline(p.cmd()),
-                rss: p.memory(),
-                cpu: p.cpu_usage(),
-                start: p.start_time(),
+            .map(|p| {
+                let pid = p.pid().as_u32();
+                let start = p.start_time();
+                let cmd = match self.cmds.get(&pid) {
+                    // An empty cmdline (a fresh or zombie process) is not cached: sysinfo
+                    // retries it on a later tick, and so does the lookup here.
+                    Some((s, c)) if *s == start && !c.is_empty() => c.clone(),
+                    _ => {
+                        let c = cmdline(p.cmd());
+                        if !c.is_empty() {
+                            self.cmds.insert(pid, (start, c.clone()));
+                        }
+                        c
+                    }
+                };
+                Proc {
+                    pid,
+                    ppid: p.parent().map_or(0, Pid::as_u32),
+                    name: p.name().to_string_lossy().into_owned(),
+                    cmd,
+                    rss: p.memory(),
+                    cpu: p.cpu_usage(),
+                    start,
+                }
             })
             .collect();
+        let live: HashSet<u32> = procs.iter().map(|p| p.pid).collect();
+        self.cmds.retain(|pid, _| live.contains(pid));
         let mem = Mem {
             used: self.sys.used_memory(),
             total: self.sys.total_memory(),
             swap_used: self.sys.used_swap(),
             swap_total: self.sys.total_swap(),
-            pressure: pressure(),
+            pressure: self.pressure(),
         };
         (procs, mem)
     }
@@ -132,6 +165,20 @@ impl Sampler {
         self.sys
             .process(Pid::from_u32(pid))
             .is_some_and(|p| p.start_time() == start)
+    }
+
+    fn pressure(&self) -> Pressure {
+        let level = self
+            .pressure_ctl
+            .as_ref()
+            .and_then(|c| c.value().ok())
+            .and_then(|v| match v {
+                sysctl::CtlValue::Int(i) => Some(i64::from(i)),
+                sysctl::CtlValue::Uint(i) => Some(i64::from(i)),
+                _ => None,
+            })
+            .unwrap_or(1);
+        Pressure::from_level(level)
     }
 }
 
@@ -157,20 +204,6 @@ pub fn cmdline(args: &[std::ffi::OsString]) -> String {
     }
     out.truncate(out.floor_char_boundary(CMD_MAX));
     out
-}
-
-fn pressure() -> Pressure {
-    use sysctl::Sysctl;
-    let level = sysctl::Ctl::new("kern.memorystatus_vm_pressure_level")
-        .and_then(|c| c.value())
-        .ok()
-        .and_then(|v| match v {
-            sysctl::CtlValue::Int(i) => Some(i64::from(i)),
-            sysctl::CtlValue::Uint(i) => Some(i64::from(i)),
-            _ => None,
-        })
-        .unwrap_or(1);
-    Pressure::from_level(level)
 }
 
 /// pane pid -> session name. Empty when tmux is not running.
@@ -200,6 +233,7 @@ mod tests {
         assert_eq!(Pressure::from_level(1), Pressure::Normal);
         assert_eq!(Pressure::from_level(2), Pressure::Warn);
         assert_eq!(Pressure::from_level(4), Pressure::Critical);
+        assert_eq!(Pressure::Critical.label(), "CRITICAL");
     }
 
     #[test]

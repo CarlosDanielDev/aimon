@@ -33,7 +33,10 @@ aimon --no-auto       # never kill on its own
 | `--tick-ms N` | 2000 | sampling interval (×2.5 when the terminal loses focus) |
 
 Keys: `↑↓`/`jk` move · `x` kill selected · `X` kill the group's dev processes · `p` panic ·
-`a` toggle auto · `t` theme (neon/matrix) · `q` quit. `NO_COLOR` is honored.
+`a` toggle auto · `t` theme (neon/matrix) · `q` quit. `x`, `X` and `p` all open the same
+confirm popup: rows arrive pre-marked, `space` toggles, `enter` fires, `esc` cancels. The
+cursor follows its process when the list re-sorts, so it never kills the row that moved
+under it. `NO_COLOR` is honored.
 
 ## Rules
 
@@ -41,7 +44,7 @@ Keys: `↑↓`/`jk` move · `x` kill selected · `X` kill the group's dev proces
   `/Applications` and `/System`.
 - **Orphan tool worker** (`vitest|jest|esbuild|tsserver|playwright|mcp|pytest`, parent is
   launchd): killed automatically after the grace period, and pre-marked in panic.
-- **Orphan runtime** (`node`, `python`, `bun`, …): shown in ÓRFÃOS but never pre-marked or
+- **Orphan runtime** (`node`, `python`, `bun`, …): shown in ORPHANS but never pre-marked or
   auto-killed, since it may be a daemon you started on purpose. Kill it with `x`.
 - **Heavy child of an agent** (a dev process above `--rss-limit-mb`): pre-marked in panic.
 - **Critical memory pressure** (`kern.memorystatus_vm_pressure_level`): auto mode kills the
