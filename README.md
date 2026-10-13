@@ -1,5 +1,7 @@
 # aimon
 
+<p align="center"><img src="assets/mascot.svg" width="220" alt="aimon mascot: a guard robot zaps an orphan process before memory pressure goes critical"></p>
+
 Tiny TUI that shows what your terminal coding agents (Claude Code, Codex, Gemini CLI, Aider,
 OpenCode, cursor-agent, Amp, Goose, Crush, Qwen, Copilot, Droid — in tmux or not) spawned, warns before
 macOS runs out of memory, and kills the leftovers before they freeze the machine.

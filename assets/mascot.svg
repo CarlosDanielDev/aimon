@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="aimon mascot: a guard robot zaps an orphan process before memory pressure goes critical">
+  <!-- Vector master of assets/gen_mascot.py. 3s loop: the RAM gauge climbs while the orphan
+       ghost feeds on it; the guard zaps it, pressure drops, the ghost respawns. -->
+  <style>
+    :root { --ground:#0b0e1a; --panel:#141a2e; --brand:#ff2e97; --accent:#00e5ff;
+            --ok:#39ff14; --warn:#ffb000; --bad:#ff3860; --muted:#8a98c4; }
+    .bob { animation: bob 1.5s ease-in-out infinite alternate; }
+    .ghost { animation: ghost 3s linear infinite; }
+    .xeyes { opacity: 0; animation: xeyes 3s linear infinite; }
+    .bolt { opacity: 0; animation: bolt 3s linear infinite; }
+    .poof { opacity: 0; transform-box: fill-box; transform-origin: center;
+            animation: poof 3s linear infinite; }
+    .pupils { animation: look 6s linear infinite; }
+    .eye { transform-box: fill-box; transform-origin: center; animation: blink 3s linear infinite; }
+    .gauge { animation: gauge 3s linear infinite; }
+    .led { animation: led 3s linear infinite; }
+    .tip { animation: tip 3s linear infinite; }
+    @keyframes bob { from { transform: translateY(-5px); } to { transform: translateY(5px); } }
+    @keyframes ghost { 0%,66% {opacity:1} 78%,90% {opacity:0} 100% {opacity:1} }
+    @keyframes xeyes { 0%,66% {opacity:0} 68%,76% {opacity:1} 78%,100% {opacity:0} }
+    @keyframes bolt { 0%,66% {opacity:0} 68%,78% {opacity:1} 80%,100% {opacity:0} }
+    @keyframes poof { 0%,76% {opacity:0; transform:scale(.5)} 80% {opacity:1; transform:scale(1)}
+                      92%,100% {opacity:0; transform:scale(1.25)} }
+    @keyframes look { 0%,100% {transform:translateX(0)} 25% {transform:translateX(-8px)}
+                      55%,75% {transform:translateX(10px)} }
+    @keyframes blink { 0%,42%,50%,100% {transform:scaleY(1)} 46% {transform:scaleY(.08)} }
+    @keyframes gauge { 0% {width:80px; fill:#39ff14} 40% {width:130px; fill:#39ff14}
+                       55% {width:172px; fill:#ffb000} 66%,68% {width:200px; fill:#ff3860}
+                       85%,100% {width:80px; fill:#39ff14} }
+    @keyframes led { 0%,40% {fill:#39ff14} 55% {fill:#ffb000} 66%,80% {fill:#ff3860}
+                     90%,100% {fill:#39ff14} }
+    @keyframes tip { 0%,66% {fill:#00e5ff} 68%,78% {fill:#ff2e97} 80%,100% {fill:#00e5ff} }
+  </style>
+
+  <rect width="512" height="512" rx="96" fill="var(--ground)"/>
+
+  <!-- orphan ghost (top right) -->
+  <g class="ghost">
+    <g class="bob">
+      <path d="M390 128a30 30 0 0 1 60 0v20l-7.5 -9 -7.5 9 -7.5 -9 -7.5 9 -7.5 -9 -7.5 9 -7.5 -9 -7.5 9z" fill="var(--warn)"/>
+      <circle cx="408" cy="122" r="5" fill="var(--ground)"/>
+      <circle cx="432" cy="122" r="5" fill="var(--ground)"/>
+      <text x="420" y="176" font-family="Menlo, monospace" font-size="20" text-anchor="middle" fill="var(--muted)">orphan</text>
+    </g>
+  </g>
+  <g class="xeyes" fill="none" stroke="var(--bad)" stroke-width="4" stroke-linecap="round">
+    <path d="M402 116l10 10M412 116l-10 10M426 116l10 10M436 116l-10 10"/>
+  </g>
+  <g class="poof">
+    <circle cx="420" cy="128" r="34" fill="none" stroke="var(--muted)" stroke-width="3"/>
+    <path d="M404 112l32 32M436 112l-32 32" stroke="var(--bad)" stroke-width="6" stroke-linecap="round"/>
+  </g>
+
+  <!-- bolt: antenna tip -> ghost -->
+  <path class="bolt" d="M256 84L304 96L352 88L392 98L420 142" fill="none"
+        stroke="var(--brand)" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/>
+  <path class="bolt" d="M256 84L304 96L352 88L392 98L420 142" fill="none"
+        stroke="#fff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+
+  <!-- antenna -->
+  <line x1="256" y1="122" x2="256" y2="84" stroke="var(--brand)" stroke-width="5"/>
+  <circle class="tip" cx="256" cy="84" r="10" fill="var(--accent)"/>
+
+  <!-- head -->
+  <rect x="146" y="118" width="220" height="150" rx="44" fill="var(--panel)" stroke="var(--brand)" stroke-width="5"/>
+  <rect x="128" y="168" width="22" height="48" rx="10" fill="none" stroke="var(--accent)" stroke-width="4"/>
+  <rect x="362" y="168" width="22" height="48" rx="10" fill="none" stroke="var(--accent)" stroke-width="4"/>
+  <rect x="166" y="148" width="180" height="90" rx="26" fill="var(--ground)" stroke="var(--muted)" stroke-opacity=".47" stroke-width="2"/>
+  <circle class="led" cx="256" cy="136" r="7" fill="var(--ok)"/>
+
+  <!-- eyes -->
+  <g class="eye">
+    <ellipse cx="220" cy="192" rx="13" ry="20" fill="var(--accent)"/>
+    <ellipse cx="292" cy="192" rx="13" ry="20" fill="var(--accent)"/>
+    <g class="pupils">
+      <circle cx="220" cy="192" r="5" fill="var(--ground)"/>
+      <circle cx="292" cy="192" r="5" fill="var(--ground)"/>
+    </g>
+  </g>
+
+  <!-- body -->
+  <rect x="166" y="278" width="180" height="126" rx="34" fill="var(--panel)" stroke="var(--muted)" stroke-opacity=".47" stroke-width="3"/>
+  <rect x="148" y="292" width="26" height="48" rx="12" fill="var(--panel)" stroke="var(--brand)" stroke-width="4"/>
+  <rect x="338" y="292" width="26" height="48" rx="12" fill="var(--panel)" stroke="var(--brand)" stroke-width="4"/>
+  <rect x="198" y="404" width="34" height="30" rx="10" fill="var(--panel)" stroke="var(--muted)" stroke-opacity=".47" stroke-width="3"/>
+  <rect x="280" y="404" width="34" height="30" rx="10" fill="var(--panel)" stroke="var(--muted)" stroke-opacity=".47" stroke-width="3"/>
+
+  <!-- gauges -->
+  <text x="186" y="304" font-family="Menlo, monospace" font-size="17" fill="var(--muted)">RAM</text>
+  <rect x="232" y="296" width="96" height="16" rx="8" fill="var(--ground)" stroke="var(--muted)" stroke-opacity=".47" stroke-width="2"/>
+  <rect class="gauge" x="234" y="298" width="80" height="12" rx="6" fill="var(--ok)"/>
+  <text x="186" y="334" font-family="Menlo, monospace" font-size="17" fill="var(--muted)">swap</text>
+  <rect x="232" y="324" width="96" height="16" rx="8" fill="var(--ground)" stroke="var(--muted)" stroke-opacity=".47" stroke-width="2"/>
+  <rect x="234" y="326" width="38" height="12" rx="6" fill="var(--accent)" fill-opacity=".67"/>
+
+  <text x="256" y="472" font-family="Menlo, monospace" font-size="40" font-weight="bold"
+        text-anchor="middle" fill="var(--brand)">aimon</text>
+</svg>
