@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""aimon mascot: a neon guard robot that watches its RAM gauge rise and zaps the orphan
-process ghost before pressure goes critical. Vector primitives only, supersampled 4x,
-exported as an animated GIF (app-directory logo, <=2MB) plus a static PNG.
+"""aimon mascot: a minimal capsule guard whose belly gauge rises with memory pressure until
+it zaps the orphan-process ghost. Claude-Code-style simplicity: one shape, dot eyes, one
+accent detail. Vector primitives only, supersampled 3x, exported as an animated GIF
+(app-directory logo, <=2MB) plus a static PNG.
 
 Run: /tmp/aimon-venv/bin/python assets/gen_mascot.py
 """
@@ -24,11 +25,10 @@ MUTED = (0x8A, 0x98, 0xC4)
 
 SIZE = 512
 S = 3  # supersample
-T_LOOP = 3.0  # seconds
 FPS = 25
-FRAMES = int(T_LOOP * FPS)
+FRAMES = 75  # 3s loop
 
-GHOST = (420, 128)  # center of the orphan ghost
+GHOST = (410, 138)  # center of the orphan ghost
 
 
 def lerp(a: float, b: float, t: float) -> float:
@@ -42,10 +42,10 @@ def ease(t: float) -> float:
 def gauge_frac(t: float) -> float:
     """Pressure rises while the orphan runs, collapses when the zap lands."""
     if t < 0.68:
-        return lerp(0.35, 0.92, ease(t / 0.68))
+        return lerp(0.12, 1.0, ease(t / 0.68))
     if t < 0.85:
-        return lerp(0.92, 0.35, ease((t - 0.68) / 0.17))
-    return 0.35
+        return lerp(1.0, 0.12, ease((t - 0.68) / 0.17))
+    return 0.12
 
 
 def gauge_color(f: float) -> tuple[int, int, int]:
@@ -66,159 +66,108 @@ def ghost_alpha(t: float) -> float:
     return (t - 0.92) / 0.08
 
 
-def rr(d: ImageDraw.ImageDraw, box: tuple[float, float, float, float], r: float, **kw) -> None:
-    d.rounded_rectangle([c * S for c in box], radius=r * S, **kw)
-
-
 def draw_frame(t: float) -> Image.Image:
     img = Image.new("RGBA", (SIZE * S, SIZE * S), GROUND + (255,))
     d = ImageDraw.Draw(img, "RGBA")
-    rr(d, (0, 0, SIZE, SIZE), 96, fill=GROUND)
+
+    def rr(box, r, **kw):
+        d.rounded_rectangle([c * S for c in box], radius=r * S, **kw)
 
     frac = gauge_frac(t)
     zapping = 0.68 <= t < 0.80
 
-    # --- ghost (behind the arm) ---
-    ga = ghost_alpha(t)
     gx, gy = GHOST[0], GHOST[1] + 5 * math.sin(2 * math.pi * t)  # bob
-    if ga > 0:
-        g = int(235 * ga)
-        body = WARN + (g,)
-        r = 30
-        d.pieslice([(gx - r) * S, (gy - r) * S, (gx + r) * S, (gy + r) * S], 180, 360, fill=body)
-        d.rectangle([(gx - r) * S, gy * S, (gx + r) * S, (gy + 20) * S], fill=body)
-        zig = []
-        for i in range(5):
-            zig += [(gx - r + i * r / 2, gy + (20 if i % 2 == 0 else 11))]
-        zig += [(gx + r, gy + 20), (gx - r, gy + 20)]
-        d.polygon([(x * S, y * S) for x, y in zig], fill=body)
-        if zapping:  # X eyes
-            for ex in (gx - 12, gx + 12):
-                for (x1, y1, x2, y2) in (
-                    (ex - 5, gy - 11, ex + 5, gy - 1),
-                    (ex + 5, gy - 11, ex - 5, gy - 1),
-                ):
-                    d.line([x1 * S, y1 * S, x2 * S, y2 * S], fill=BAD + (g,), width=3 * S)
-        else:
-            for ex in (gx - 12, gx + 12):
-                d.ellipse(
-                    [(ex - 5) * S, (gy - 12) * S, (ex + 5) * S, (gy - 2) * S],
-                    fill=GROUND + (g,),
-                )
-        d.text(
-            ((gx) * S, (gy + 44) * S),
-            "orphan",
-            font=font(20),
-            anchor="mm",
-            fill=MUTED + (int(200 * ga),),
-        )
+    ga = ghost_alpha(t)
 
-    # --- antenna ---
-    tip_y = 84
-    d.line([256 * S, 122 * S, 256 * S, tip_y * S], fill=BRAND, width=5 * S)
-    glow = 22 if zapping else 0
-    if glow:
-        d.ellipse(
-            [(256 - glow) * S, (tip_y - glow) * S, (256 + glow) * S, (tip_y + glow) * S],
-            fill=BRAND + (90,),
-        )
-    d.ellipse(
-        [(256 - 10) * S, (tip_y - 10) * S, (256 + 10) * S, (tip_y + 10) * S],
-        fill=ACCENT if not zapping else BRAND,
-    )
-
-    # --- bolt: antenna tip -> ghost, arcing over the head ---
+    # --- bolt: antenna tip -> ghost ---
     if zapping:
         p = (t - 0.68) / 0.12
-        pts = [(256, tip_y)]
-        for i, (mx, my) in enumerate([(304, 96), (352, 88), (392, 98)]):
-            jitter = 9 * math.sin(i * 9 + p * 12)
-            pts.append((mx + jitter, my + jitter * 0.4))
-        pts.append((gx, gy + 14))
+        pts = [(256, 108), (310, 122), (362, 114), (gx, gy + 12)]
         d.line(
             [(x * S, y * S) for x, y in pts],
             fill=BRAND + (int(255 * min(1, 1.3 - p)),),
             width=7 * S,
             joint="curve",
         )
-        d.line(
-            [(x * S, y * S) for x, y in pts],
-            fill=(255, 255, 255, int(200 * min(1, 1.3 - p))),
-            width=2 * S,
-            joint="curve",
-        )
 
-    # --- head ---
-    rr(d, (146, 118, 366, 268), 44, fill=PANEL, outline=BRAND, width=5)
-    rr(d, (128, 168, 150, 216), 10, outline=ACCENT, width=4)  # ears
-    rr(d, (362, 168, 384, 216), 10, outline=ACCENT, width=4)
-    rr(d, (166, 148, 346, 238), 26, fill=GROUND, outline=MUTED + (120,), width=2)  # visor
-
-    # --- eyes ---
-    look = 12 * math.sin(2 * math.pi * t * 0.5)
-    if 0.60 <= t < 0.75:
-        look = 14  # watch the ghost
-    blink = 1.0
-    if 0.44 <= t < 0.50:
-        blink = abs(math.cos(math.pi * (t - 0.44) / 0.06))
-    for ex in (256 - 36, 256 + 36):
-        ry = 20 * blink
-        d.ellipse(
-            [(ex - 13) * S, (192 - ry) * S, (ex + 13) * S, (192 + ry) * S],
-            fill=ACCENT,
-        )
-        d.ellipse(
-            [(ex - 5 + look) * S, (192 - 7 * blink) * S, (ex + 5 + look) * S, (192 + 7 * blink) * S],
-            fill=GROUND,
-        )
-
-    # --- body + gauge panel ---
-    rr(d, (166, 278, 346, 404), 34, fill=PANEL, outline=MUTED + (120,), width=3)
-    rr(d, (148, 292, 174, 340), 12, fill=PANEL, outline=BRAND, width=4)  # arms
-    rr(d, (338, 292, 364, 340), 12, fill=PANEL, outline=BRAND, width=4)
-    rr(d, (198, 404, 232, 434), 10, fill=PANEL, outline=MUTED + (120,), width=3)
-    rr(d, (280, 404, 314, 434), 10, fill=PANEL, outline=MUTED + (120,), width=3)
-
-    d.text((186 * S, 302 * S), "RAM", font=font(17), anchor="lm", fill=MUTED)
-    tx0, tx1, ty0, ty1 = 232, 328, 296, 312
-    rr(d, (tx0, ty0, tx1, ty1), 8, fill=GROUND, outline=MUTED + (120,), width=2)
-    if frac > 0.02:
-        rr(
-            d,
-            (tx0 + 2, ty0 + 2, lerp(tx0 + 2, tx1 - 2, frac), ty1 - 2),
-            6,
-            fill=gauge_color(frac),
-        )
-    d.text((186 * S, 330 * S), "swap", font=font(17), anchor="lm", fill=MUTED)
-    rr(d, (232, 324, 328, 340), 8, fill=GROUND, outline=MUTED + (120,), width=2)
-    rr(d, (234, 326, lerp(234, 326, 0.4), 338), 6, fill=ACCENT + (170,))
-
-    # status brow: a forehead dot that reads the pressure
-    led = gauge_color(frac)
-    d.ellipse([(256 - 7) * S, 129 * S, (256 + 7) * S, 143 * S], fill=led)
+    # --- ghost ---
+    if ga > 0:
+        g = int(235 * ga)
+        body = WARN + (g,)
+        r = 26
+        d.pieslice([(gx - r) * S, (gy - r) * S, (gx + r) * S, (gy + r) * S], 180, 360, fill=body)
+        d.rectangle([(gx - r) * S, gy * S, (gx + r) * S, (gy + 16) * S], fill=body)
+        zig = [(gx - r + i * r / 2, gy + (16 if i % 2 == 0 else 8)) for i in range(5)]
+        zig += [(gx + r, gy + 16), (gx - r, gy + 16)]
+        d.polygon([(x * S, y * S) for x, y in zig], fill=body)
+        if zapping:  # X eyes
+            for ex in (gx - 10, gx + 10):
+                d.line(
+                    [(ex - 4) * S, (gy - 9) * S, (ex + 4) * S, (gy - 1) * S],
+                    fill=BAD + (g,),
+                    width=3 * S,
+                )
+                d.line(
+                    [(ex + 4) * S, (gy - 9) * S, (ex - 4) * S, (gy - 1) * S],
+                    fill=BAD + (g,),
+                    width=3 * S,
+                )
+        else:
+            for ex in (gx - 10, gx + 10):
+                d.ellipse(
+                    [(ex - 4) * S, (gy - 10) * S, (ex + 4) * S, (gy - 2) * S],
+                    fill=GROUND + (g,),
+                )
 
     # --- poof ring ---
     if 0.76 <= t < 0.92:
         p = (t - 0.76) / 0.16
-        r = lerp(28, 72, p)
+        r = lerp(24, 62, p)
         d.ellipse(
             [(gx - r) * S, (gy - r) * S, (gx + r) * S, (gy + r) * S],
             outline=MUTED + (int(220 * (1 - p)),),
-            width=max(1, int(5 * (1 - p))) * S,
+            width=max(1, int(4 * (1 - p))) * S,
         )
 
-    # --- poof X (the orphan is gone) ---
-    if 0.80 <= t < 0.92:
-        a = int(255 * (1 - (t - 0.80) / 0.12))
-        for (x1, y1, x2, y2) in ((-16, -16, 16, 16), (16, -16, -16, 16)):
-            d.line(
-                [(gx + x1) * S, (gy + y1) * S, (gx + x2) * S, (gy + y2) * S],
-                fill=BAD + (a,),
-                width=5 * S,
-            )
+    # --- antenna ---
+    d.line([256 * S, 152 * S, 256 * S, 108 * S], fill=BRAND, width=5 * S)
+    d.ellipse(
+        [(256 - 10) * S, 98 * S, (256 + 10) * S, 118 * S],
+        fill=BRAND if zapping else ACCENT,
+    )
+
+    # --- body: one capsule ---
+    rr((166, 150, 346, 392), 70, fill=PANEL, outline=BRAND, width=6)
+
+    # --- eyes: two dots, a blink, a glance ---
+    look = 4 * math.sin(2 * math.pi * t * 0.5)
+    if 0.60 <= t < 0.75:
+        look = 6  # watch the ghost
+    blink = 1.0
+    if 0.44 <= t < 0.50:
+        blink = abs(math.cos(math.pi * (t - 0.44) / 0.06))
+    for ex in (222, 290):
+        ry = 12 * blink
+        d.ellipse(
+            [(ex - 11) * S, (208 - ry) * S, (ex + 11) * S, (208 + ry) * S],
+            fill=ACCENT,
+        )
+        d.ellipse(
+            [(ex - 4 + look) * S, (208 - 5 * blink) * S, (ex + 4 + look) * S, (208 + 5 * blink) * S],
+            fill=GROUND,
+        )
+
+    # --- belly gauge ---
+    rr((196, 330, 316, 348), 9, fill=GROUND, outline=MUTED + (110,), width=2)
+    if frac > 0.04:
+        rr(
+            (200, 334, lerp(200, 312, frac), 344),
+            5,
+            fill=gauge_color(frac),
+        )
 
     # --- wordmark ---
-    d.text((256 * S, 468 * S), "aimon", font=font(40), anchor="mm", fill=BRAND)
+    d.text((256 * S, 462 * S), "aimon", font=font(40), anchor="mm", fill=BRAND)
 
     return img.resize((SIZE, SIZE), Image.LANCZOS)
 
