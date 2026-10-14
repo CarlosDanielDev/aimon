@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""aimon mascot: a chibi guardian creature — monster-design language, not a monster you know.
+"""aimon art, generated: pixel sprites on a rounded vector canvas.
 
-Round teal body, big sparkly eyes, one notched ear, a belly that literally IS the memory
-gauge, and a pink zigzag tail that fires the zap. It watches an invader ghost feed on its
-belly meter, gets cross, zaps the ghost with its tail, and goes happy when pressure drops.
-Pixel sprite (48 grid, outlined + shaded) on a rounded vector canvas. 3s loop.
+- icon: a terminal window (prompt, cursor) sweeping its processes into a trash can.
+- mascot: the guardian creature sweeps orphan debris with a broom; its "!" bubble pops
+  when memory pressure climbs. 3s loop.
 
 Run: /tmp/aimon-venv/bin/python assets/gen_mascot.py
 """
@@ -15,18 +14,18 @@ from pathlib import Path
 
 from PIL import Image
 
-# Theme (src/theme.rs neon) + creature shades for value contrast on the dark ground.
 GROUND = (0x0B, 0x0E, 0x1A)
+PANEL = (0x14, 0x1A, 0x2E)
 BODY = (0x1F, 0x8F, 0xA8)
 BODY_L = (0x45, 0xC8, 0xDC)
 BODY_D = (0x14, 0x5E, 0x74)
 OUT = (0x08, 0x12, 0x1E)
 BELLY = (0xBF, 0xEE, 0xF7)
-BELLY_D = (0x8F, 0xC9, 0xDD)
+CYAN = (0x4D, 0xD7, 0xE8)
+CYAN_L = (0x9F, 0xEB, 0xF5)
 BRAND = (0xFF, 0x2E, 0x97)
 PINK_L = (0xFF, 0x6C, 0xB0)
 ACCENT = (0x00, 0xE5, 0xFF)
-CYAN_L = (0x7D, 0xF3, 0xFF)
 OK = (0x39, 0xFF, 0x14)
 WARN = (0xFF, 0xB0, 0x00)
 BAD = (0xFF, 0x38, 0x60)
@@ -38,20 +37,6 @@ GRID = 48
 SCALE = 10
 FPS = 25
 FRAMES = 75  # 3s loop
-
-GHOST_XY = (35, 5)
-GHOST = [
-    "..yyy.yy.",
-    ".yyyyyyy.",
-    "yyeyyeyy.",
-    "yyyyyyyyy",
-    "yyyyyyyyy",
-    ".yy.yy.y.",
-    "y.y..y.y.",
-]
-# tail tip -> ghost arc, lit while zapping
-ZAP_CELLS = [(43, 18), (43, 16), (42, 14), (42, 12)]
-STAR_CELLS = [(44, 3), (46, 9), (39, 4), (46, 12)]
 
 
 class Grid:
@@ -75,16 +60,15 @@ class Grid:
 
     def ball(self, cx: float, cy: float, r: int, fill: tuple[int, ...],
              shade: tuple[int, ...] | None = None, light: tuple[int, ...] | None = None) -> None:
-        """Outlined ball with an optional light crescent (top-left) and shade (bottom-right)."""
         self.ellipse(cx, cy, r + 1, r + 1, OUT)
         self.ellipse(cx, cy, r, r, fill)
-        if shade is not None:  # inner offset ring, bottom-right
+        if shade is not None:
             for y in range(int(cy - r), int(cy + r) + 1):
                 for x in range(int(cx - r), int(cx + r) + 1):
                     if ((x - cx + 1.5) / (r - 1)) ** 2 + ((y - cy + 1.5) / (r - 1)) ** 2 > 1.0:
                         if self.px.get((x, y)) == fill:
                             self.put(x, y, shade)
-        if light is not None:  # thin crescent, top-left
+        if light is not None:
             for y in range(int(cy - r), int(cy + r) + 1):
                 for x in range(int(cx - r), int(cx + r) + 1):
                     if ((x - cx - 2.0) / (r - 1)) ** 2 + ((y - cy - 2.0) / (r - 1)) ** 2 > 1.0:
@@ -107,11 +91,41 @@ def ease(t: float) -> float:
     return t * t * (3 - 2 * t)
 
 
+# ---------------------------------------------------------------- icon
+
+def draw_icon() -> Grid:
+    """Terminal window + prompt + cursor; a trash can eating process debris."""
+    g = Grid()
+    # window: cyan frame, filled title band with pink traffic dots
+    g.rect(5, 5, 34, 41, CYAN)
+    g.rect(7, 7, 32, 39, GROUND)
+    g.rect(7, 7, 32, 12, CYAN)
+    for i in range(3):
+        g.rect(9 + i * 4, 9, 11 + i * 4, 11, BRAND)
+    # prompt: ">" chevron + cursor
+    for i, yy in enumerate(range(20, 29)):
+        g.rect(12 + abs(4 - i), yy, 13 + abs(4 - i), yy, CYAN_L)
+    g.rect(17, 29, 24, 30, CYAN_L)
+    # trash can at the corner, eating debris
+    g.rect(32, 27, 45, 29, CYAN_L)  # lid
+    g.rect(36, 25, 38, 26, CYAN_L)  # handle
+    g.rect(33, 31, 44, 43, CYAN_L)  # body
+    g.rect(35, 33, 36, 41, GROUND)
+    g.rect(40, 33, 41, 41, GROUND)  # slots
+    # debris flying in
+    for x, y, c in [(28, 20, BRAND), (24, 24, BRAND), (28, 28, PINK_L),
+                    (26, 33, BRAND), (43, 15, BRAND), (46, 20, ACCENT)]:
+        g.rect(x, y, x + 1, y + 1, c)
+    return g
+
+
+# ---------------------------------------------------------------- mascot
+
 def gauge_frac(t: float) -> float:
-    if t < 0.68:
-        return t / 0.68
+    if t < 0.6:
+        return t / 0.6
     if t < 0.85:
-        return 1.0 - ease((t - 0.68) / 0.17)
+        return 1.0 - ease((t - 0.6) / 0.25)
     return 0.0
 
 
@@ -123,183 +137,105 @@ def gauge_color(f: float) -> tuple[int, ...]:
     return OK
 
 
-def ghost_alpha(t: float) -> float:
-    if t < 0.68:
-        return 1.0
-    if t < 0.78:
-        return 1.0 - (t - 0.68) / 0.10
-    if t < 0.92:
-        return 0.0
-    return (t - 0.92) / 0.08
-
-
-TAIL = [  # thick zigzag bolt tail, hip to shoulder blade; the tip charges and fires
-    (31, 41), (32, 41), (32, 40), (33, 40),
-    (33, 39), (34, 39), (34, 38), (35, 38),
-    (34, 37), (35, 37), (33, 36), (34, 36),
-    (33, 35), (34, 35), (34, 34), (35, 34),
-    (35, 33), (36, 33), (36, 32), (37, 32),
-    (37, 31), (38, 31), (38, 30), (39, 30),
-    (39, 29), (40, 29), (40, 28), (41, 28),
-    (41, 27), (42, 27), (42, 26), (43, 26),
-    (43, 25), (44, 25), (44, 24), (45, 24),
-    (45, 23), (44, 22), (44, 21), (43, 20),
-]
+BUBBLE = (34, 3)  # top-left of the "!" speech bubble
+DEBRIS = [(5, 38), (9, 42), (13, 44), (16, 40), (3, 44), (8, 36), (12, 39), (18, 44)]
 
 
 def draw(t: float) -> Grid:
     g = Grid()
     frac = gauge_frac(t)
-    zapping = 0.68 <= t < 0.80
-    happy = 0.80 <= t < 0.95
+    alert = 0.6 <= t < 0.9  # the "!" bubble pops while pressure is high
+    stroke = int(t / 3 * 12) % 2  # broom sweeps: two positions
     bob = -1 if math.sin(2 * math.pi * t) > 0 else 0
     y = bob
 
-    g.rect(12, 45, 32, 45, (0x14, 0x22, 0x2E, 255))  # ground shadow
+    g.rect(10, 46, 38, 46, (0x14, 0x22, 0x2E, 255))  # ground shadow
 
-    # tail: pink zigzag rising to the right, tip charges with pressure
-    charge = BAD if frac >= 0.85 else (WARN if frac >= 0.7 else PINK_L)
-    tip = TAIL[-1]
-    if frac >= 0.99 and not zapping:
-        g.put(tip[0], tip[1] + y, WHITE)  # fully charged flash
+    # ears
+    for x0, x1, yy in [(14, 14, 4), (13, 15, 5), (12, 16, 6), (12, 17, 7)]:
+        g.rect(x0, yy + y, x1, yy + y, OUT)
+        g.rect(x0 + 1, yy + y, x1 - 1, yy + y, BODY)
+    g.rect(14, 6 + y, 14, 8 + y, PINK_L)
+    for x0, x1, yy in [(31, 31, 4), (30, 32, 5), (29, 33, 6), (29, 34, 7)]:
+        g.rect(x0, yy + y, x1, yy + y, OUT)
+        g.rect(x0 + 1, yy + y, x1 - 1, yy + y, BODY)
+    g.rect(31, 6 + y, 32, 8 + y, PINK_L)
+
+    # head, tilted toward the sweep (down-left)
+    g.ball(25, 17 + y, 11, BODY, shade=BODY_D, light=BODY_L)
+    g.rect(23, 28 + y, 28, 30 + y, BODY_D)  # neck
+
+    # face: eyes look down-left at the debris
+    blink = 0.3 <= t < 0.36
+    for ex in (17, 28):
+        if blink:
+            g.rect(ex, 16 + y, ex + 3, 16 + y, INK)
+            continue
+        g.rect(ex, 12 + y, ex + 3, 16 + y, INK)
+        g.rect(ex, 12 + y, ex + 1, 13 + y, WHITE)
+        g.put(ex + 3, 16 + y, CYAN_L)
+    # mouth: "o" while alerting, smile otherwise
+    if alert:
+        g.rect(23, 22 + y, 26, 23 + y, INK)
+    else:
+        g.rect(22, 22 + y, 25, 22 + y, INK)
+        g.put(21, 21 + y, INK)
+        g.put(26, 21 + y, INK)
+    g.rect(12, 19 + y, 13, 20 + y, ACCENT)
+    g.rect(35, 19 + y, 36, 20 + y, ACCENT)
+
+    # body + belly meter
+    g.ellipse(25, 38 + y, 10, 7, OUT)
+    g.ellipse(25, 38 + y, 9, 6, BODY)
+    g.ellipse(25, 39 + y, 7, 4, BELLY)
+    g.rect(20, 38 + y, 30, 39 + y, BODY_D)
+    w = round(10 * frac)
+    if w:
+        g.rect(20, 38 + y, 20 + w - 1, 39 + y, gauge_color(frac))
 
     # feet
-    g.ball(15, 43 + y, 2, BODY, shade=BODY_D)
-    g.ball(28, 43 + y, 2, BODY, shade=BODY_D)
+    g.ball(19, 45 + y, 2, BODY, shade=BODY_D)
+    g.ball(31, 45 + y, 2, BODY, shade=BODY_D)
 
-    # ears: solid triangles leaning out; pink inner near the tip; right one notched
-    for x0, x1, yy in [(13, 13, 3), (12, 14, 4), (11, 15, 5), (10, 16, 6), (10, 17, 7), (10, 18, 8)]:
-        g.rect(x0, yy + y, x1, yy + y, OUT)
-        g.rect(x0 + 1, yy + y, x1 - 1, yy + y, BODY)
-    g.rect(12, 5 + y, 13, 7 + y, PINK_L)
-    for x0, x1, yy in [(29, 29, 3), (28, 30, 4), (27, 31, 5), (26, 32, 6), (26, 33, 7), (26, 34, 8)]:
-        g.rect(x0, yy + y, x1, yy + y, OUT)
-        g.rect(x0 + 1, yy + y, x1 - 1, yy + y, BODY)
-    g.rect(29, 5 + y, 30, 7 + y, PINK_L)
-    g.rect(31, 7 + y, 33, 8 + y, GROUND + (255,))  # notch bite out of the right ear
+    # left arm; right arm grips the broom
+    g.rect(13, 34 + y, 14, 37 + y, BODY_L)
+    g.rect(33, 30 + y, 34, 34 + y, BODY_L)
+    g.rect(33, 29 + y, 34, 30 + y, BRAND)  # little glove on the handle
 
-    # body
-    g.ellipse(21, 37 + y, 10, 8, OUT)
-    g.ellipse(21, 37 + y, 9, 7, BODY)
-    g.ellipse(20, 37 + y, 7, 5, BELLY)
-    # arms: tiny nubs, one shade lighter than the shadow side
-    g.rect(9, 34 + y, 10, 36 + y, BODY_L)
-    g.rect(32, 34 + y, 33, 36 + y, BODY_L)
-
-    # tail root sits on the body's right hip, so the bolt grows out of it
-    for i, (x, yy) in enumerate(TAIL):
-        g.put(x, yy + y, BRAND if i < len(TAIL) - 6 else charge)
-
-    # belly meter: the gauge IS its tummy
-    g.rect(15, 36 + y, 27, 37 + y, BODY_D)
-    w = round(12 * frac)
-    if w:
-        c = gauge_color(frac)
-        g.rect(15, 36 + y, 15 + w - 1, 37 + y, c)
-        g.put(15, 36 + y, (min(255, c[0] + 60), min(255, c[1] + 60), min(255, c[2] + 60), 255))
-
-    # head: big round, light crescent
-    g.ball(21, 19 + y, 12, BODY, shade=BODY_D, light=BODY_L)
-
-    # face: solid dark eyes with big white highlights — the cute-sprite formula
-    blink = 0.44 <= t < 0.50
-    squint = frac >= 0.85 or zapping
-    for ex in (12, 25):
-        if happy:
-            # ^ ^ arc eyes
-            for dx, dy in ((0, 2), (1, 1), (2, 1), (3, 2)):
-                g.put(ex + dx, 16 + dy + y, INK)
-                g.put(ex + dx, 17 + dy + y, INK)
-            continue
-        if blink and not squint:
-            g.rect(ex, 18 + y, ex + 3, 18 + y, INK)
-            continue
-        g.rect(ex, 14 + y, ex + 3, 18 + y, INK)
-        g.put(ex, 14 + y, (0x2A, 0x3A, 0x55, 255))
-        g.rect(ex, 14 + y, ex + 1, 15 + y, WHITE)  # big highlight
-        g.put(ex + 3, 18 + y, CYAN_L)  # bottom accent
-    if squint:
-        # angry brows
-        g.rect(12, 12 + y, 14, 12 + y, INK)
-        g.put(13, 11 + y, INK)
-        g.rect(25, 12 + y, 27, 12 + y, INK)
-        g.put(26, 11 + y, INK)
-    # mouth: tiny cat smile, open grin when happy, flat line under pressure
-    if happy:
-        g.rect(19, 26 + y, 23, 27 + y, INK)
-        g.rect(20, 27 + y, 22, 27 + y, PINK_L)  # tongue
-    elif squint:
-        g.rect(18, 26 + y, 24, 26 + y, INK)
+    # broom: long cyan handle, brush head sweeping the floor well left of the feet
+    if stroke:
+        for i in range(15):
+            g.put(33 - i, 29 + i + y, CYAN)
+            g.put(34 - i, 29 + i + y, CYAN_L)
+        g.rect(13, 43 + y, 21, 44 + y, CYAN)
+        g.rect(12, 45 + y, 22, 46 + y, PINK_L)  # bristles
+        swept = DEBRIS
     else:
-        g.rect(19, 26 + y, 22, 26 + y, INK)
-        g.put(18, 25 + y, INK)
-        g.put(23, 25 + y, INK)
-    # cheek gems — teal-cyan, not red cheeks
-    g.rect(10, 23 + y, 11, 24 + y, ACCENT)
-    g.rect(30, 23 + y, 31, 24 + y, ACCENT)
+        for i in range(13):
+            g.put(32 - i, 29 + i + y, CYAN)
+            g.put(33 - i, 29 + i + y, CYAN_L)
+        g.rect(16, 42 + y, 24, 43 + y, CYAN)
+        g.rect(15, 44 + y, 25, 46 + y, PINK_L)
+        swept = [(x - 4, yy) for x, yy in DEBRIS]
+    # debris: orphan pixels being swept away, fading at the edge
+    for i, (x, yy) in enumerate(swept):
+        c = BRAND if i % 2 == 0 else CYAN_L
+        if int(t * FPS + i) % 7 == 0:
+            continue  # flicker
+        g.put(x, yy, c)
+        if i % 3 == 0:
+            g.put(x + 1, yy, c)
 
-    # the zap: tail tip -> ghost, impact stars
-    if zapping:
-        for x, yy in ZAP_CELLS:
-            g.put(x, yy + y, BRAND)
-        g.put(*ZAP_CELLS[0], WHITE)
-        for x, yy in STAR_CELLS:
-            g.put(x, yy, WHITE)
+    # "!" speech bubble pops while alerting
+    if alert:
+        pop = (t - 0.6) < 0.04
+        bx, by = BUBBLE[0], BUBBLE[1] + (1 if pop else 0)
+        g.rect(bx, by, bx + 11, by + 9, BRAND)
+        g.rect(bx + 1, by + 1, bx + 10, by + 8, PANEL)
+        g.rect(bx + 2, by + 9, bx + 3, by + 10, BRAND)  # tail
+        g.rect(bx + 5, by + 2, bx + 6, by + 5, BRAND)   # !
+        g.rect(bx + 5, by + 7, bx + 6, by + 7, BRAND)
 
-    # ghost: flee-bob, X eyes when zapped, dithered respawn, poof ring after
-    ga = ghost_alpha(t)
-    if ga > 0:
-        gy = GHOST_XY[1] + (1 if math.sin(2 * math.pi * t * 2) > 0 else 0)
-        dither = ga < 1.0 and (int(t * FPS) % 2 == 0)
-        for dy, row in enumerate(GHOST):
-            for dx, cell in enumerate(row):
-                if cell == ".":
-                    continue
-                if dither and (dx + dy) % 2 == 0:
-                    continue
-                g.put(GHOST_XY[0] + dx, gy + dy, WARN if cell == "y" else OUT)
-        for dx in (2, 5):
-            g.put(GHOST_XY[0] + dx, gy + 2, BAD if zapping else OUT)
-    elif 0.78 <= t < 0.92:
-        p = (t - 0.78) / 0.14
-        cx, cy = GHOST_XY[0] + 4, GHOST_XY[1] + 3
-        r = 3 if p < 0.5 else 5
-        for i in range(-r, r + 1):
-            for x, yy in ((cx + i, cy - r), (cx + i, cy + r), (cx - r, cy + i), (cx + r, cy + i)):
-                g.put(x, yy, MUTED)
-        if p > 0.35:
-            for dx, dy in ((-2, -2), (2, -2), (0, 0), (-2, 2), (2, 2)):
-                g.put(cx + dx, cy + dy, BAD)
-
-    return g
-
-
-def draw_icon() -> Grid:
-    """App icon: just the creature's head, way simpler than the mascot. Reads at 16px."""
-    g = Grid()
-    # ears
-    for x0, x1, yy in [(10, 14, 4), (10, 15, 5), (9, 16, 6), (9, 17, 7), (9, 18, 8), (9, 19, 9)]:
-        g.rect(x0, yy, x1, yy, OUT)
-        g.rect(x0 + 1, yy, x1 - 1, yy, BODY)
-    g.rect(11, 5, 11, 9, PINK_L)
-    for x0, x1, yy in [(33, 37, 4), (32, 38, 5), (31, 39, 6), (31, 40, 7), (31, 41, 8), (31, 42, 9)]:
-        g.rect(x0, yy, x1, yy, OUT)
-        g.rect(x0 + 1, yy, x1 - 1, yy, BODY)
-    g.rect(38, 5, 38, 9, PINK_L)
-    # head ball
-    g.ball(24, 26, 17, BODY, shade=BODY_D, light=BODY_L)
-    # eyes: solid dark, big white highlight — the cute-sprite formula
-    for ex in (14, 27):
-        g.rect(ex, 22, ex + 4, 28, INK)
-        g.put(ex, 22, (0x2A, 0x3A, 0x55, 255))
-        g.rect(ex, 22, ex + 1, 23, WHITE)
-        g.put(ex + 4, 28, CYAN_L)
-    # smile + gems
-    g.rect(21, 34, 27, 34, INK)
-    g.put(21, 33, INK)
-    g.put(27, 33, INK)
-    g.rect(6, 32, 7, 33, ACCENT)
-    g.rect(40, 32, 41, 33, ACCENT)
     return g
 
 
@@ -313,49 +249,45 @@ def rounded_bg(size: int, radius: int) -> Image.Image:
 
 
 def svg_frame() -> str:
-    """Vector canvas + static frame (t=0.15) as crisp rects + SMIL groups for zap/poof."""
+    """Static poster frame (t=0.2) as crisp rects — the GIF carries the motion."""
 
     def hexs(c: tuple[int, ...]) -> str:
         return f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
 
-    def anim(values: str, key_times: str) -> str:
-        return (
-            f'<animate attributeName="opacity" values="{values}" keyTimes="{key_times}" '
-            'dur="3s" repeatCount="indefinite"/>'
-        )
+    cells = [
+        f'<rect x="{x}" y="{yy}" width="1" height="1" fill="{hexs(c)}"/>'
+        for (x, yy), c in sorted(draw(0.2).px.items())
+    ]
+    return "\n".join(
+        [
+            '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 48 48" '
+            'shape-rendering="crispEdges" role="img" aria-label="aimon mascot: a pixel guardian '
+            'creature sweeps orphan-process debris while its alert bubble pops">',
+            f'<rect width="48" height="48" rx="10" fill="{hexs(GROUND)}"/>',
+            *cells,
+            "</svg>",
+        ]
+    )
+
+
+def icon_svg() -> str:
+    def hexs(c: tuple[int, ...]) -> str:
+        return f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
 
     cells = [
         f'<rect x="{x}" y="{yy}" width="1" height="1" fill="{hexs(c)}"/>'
-        for (x, yy), c in sorted(draw(0.15).px.items())
+        for (x, yy), c in sorted(draw_icon().px.items())
     ]
-    out = [
-        '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 48 48" '
-        'shape-rendering="crispEdges" role="img" aria-label="aimon mascot: a pixel guardian '
-        'creature zaps an orphan-process ghost with its bolt tail before its belly gauge maxes out">',
-        f'<rect width="48" height="48" rx="10" fill="{hexs(GROUND)}"/>',
-        *cells,
-        '<g fill="#ff2e97" opacity="0">'
-        + "".join(f'<rect x="{x}" y="{yy}" width="1" height="1"/>' for x, yy in ZAP_CELLS)
-        + anim("0;0;1;1;0;0", "0;0.68;0.70;0.78;0.80;1")
-        + "</g>",
-        '<g fill="#f2f8ff" opacity="0">'
-        + "".join(f'<rect x="{x}" y="{yy}" width="1" height="1"/>' for x, yy in STAR_CELLS)
-        + anim("0;0;1;0;0", "0;0.70;0.74;0.80;1")
-        + "</g>",
-        '<g fill="#ff3860" opacity="0"><rect x="37" y="7" width="1" height="1"/>'
-        '<rect x="40" y="7" width="1" height="1"/>'
-        + anim("0;0;1;1;0;0", "0;0.68;0.70;0.78;0.80;1")
-        + "</g>",
-        '<g fill="#8a98c4" opacity="0">'
-        + "".join(
-            f'<rect x="{GHOST_XY[0] + 4 + dx}" y="{GHOST_XY[1] + 3 + dy}" width="1" height="1"/>'
-            for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3), (-5, 0), (5, 0), (0, -5), (0, 5)]
-        )
-        + anim("0;0;1;0;0", "0;0.78;0.84;0.92;1")
-        + "</g>",
-        "</svg>",
-    ]
-    return "\n".join(out)
+    return "\n".join(
+        [
+            '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 48 48" '
+            'shape-rendering="crispEdges" role="img" aria-label="aimon icon: a terminal window '
+            'sweeps its processes into a trash can">',
+            f'<rect width="48" height="48" rx="10" fill="{hexs(GROUND)}"/>',
+            *cells,
+            "</svg>",
+        ]
+    )
 
 
 def main() -> None:
@@ -376,16 +308,16 @@ def main() -> None:
         loop=0,
         optimize=True,
     )
-    frames[int(0.15 * FRAMES)].convert("RGB").save(out / "mascot-512.png", optimize=True)
+    frames[int(0.2 * FRAMES)].convert("RGB").save(out / "mascot-512.png", optimize=True)
     (out / "mascot.svg").write_text(svg_frame())
 
-    # app icon: creature head, bigger grid share, on the same rounded canvas
-    canvas = rounded_bg(512, 96)
-    sprite = draw_icon().to_image().resize((GRID * SCALE, GRID * SCALE), Image.NEAREST)
-    canvas.alpha_composite(sprite, (16, 16))
-    canvas.convert("RGB").save(out / "icon-512.png", optimize=True)
-    canvas.resize((32, 32), Image.LANCZOS).save(out / "icon-32.png", optimize=True)
-    print("icon-512.png, icon-32.png")
+    icon_canvas = rounded_bg(512, 96)
+    icon_sprite = draw_icon().to_image().resize((GRID * SCALE, GRID * SCALE), Image.NEAREST)
+    icon_canvas.alpha_composite(icon_sprite, (16, 16))
+    icon_canvas.convert("RGB").save(out / "icon-512.png", optimize=True)
+    icon_canvas.resize((32, 32), Image.LANCZOS).save(out / "icon-32.png", optimize=True)
+    (out / "icon.svg").write_text(icon_svg())
+    print(f"{gif.name}: {gif.stat().st_size / 1024:.0f} KB; icon-512/icon-32/icon.svg written")
 
 
 if __name__ == "__main__":
