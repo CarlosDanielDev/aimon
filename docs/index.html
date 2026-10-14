@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aimon — watch what your AI agents spawn</title>
+<meta name="description" content="Tiny TUI that shows what terminal coding agents spawn, warns before your machine runs out of memory, and kills the orphaned workers before they freeze it. macOS, Linux, Windows.">
+<link rel="icon" type="image/png" href="icon.png">
+<style>
+  :root {
+    --ground: #0b0e1a;
+    --panel: #141a2e;
+    --line: #232c52;
+    --body: #3a4670;
+    --cyan: #4dd7e8;
+    --cyan-l: #9febf5;
+    --pink: #ff2e97;
+    --pink-l: #ff6cb0;
+    --green: #39ff14;
+    --warn: #ffb000;
+    --text: #dbe6f5;
+    --muted: #8a98c4;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--ground);
+    color: var(--text);
+    font-family: var(--mono);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--cyan); text-decoration: none; }
+  a:hover { color: var(--cyan-l); text-decoration: underline; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 18px 0; border-bottom: 1px solid var(--line);
+  }
+  header img { width: 40px; height: 40px; image-rendering: pixelated; border-radius: 8px; }
+  header .name { font-weight: 700; font-size: 18px; letter-spacing: 1px; }
+  header .name span { color: var(--pink); }
+  header nav { margin-left: auto; display: flex; gap: 18px; font-size: 14px; }
+
+  .hero { display: grid; grid-template-columns: 1fr auto; gap: 40px; align-items: center; padding: 64px 0 48px; }
+  .hero h1 { font-size: clamp(28px, 5vw, 44px); line-height: 1.15; letter-spacing: -0.5px; }
+  .hero h1 em { font-style: normal; color: var(--pink); }
+  .hero p.tag { color: var(--muted); margin: 18px 0 26px; font-size: 16px; max-width: 46ch; }
+  .hero img { width: 300px; image-rendering: pixelated; border-radius: 16px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+  .badges img { width: auto; height: 20px; border-radius: 0; }
+
+  .install {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 16px; font-size: 14px; max-width: 480px;
+  }
+  .install code { color: var(--green); flex: 1; overflow-x: auto; white-space: nowrap; }
+  .install button {
+    background: var(--pink); color: #fff; border: 0; border-radius: 6px;
+    font-family: var(--mono); font-size: 12px; padding: 6px 10px; cursor: pointer;
+  }
+  .install button:hover { background: var(--pink-l); }
+  .cta { display: flex; gap: 12px; margin-top: 22px; flex-wrap: wrap; }
+  .cta a.btn {
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 18px; font-size: 14px;
+  }
+  .cta a.btn.primary { background: var(--pink); border-color: var(--pink); color: #fff; }
+  .cta a.btn.primary:hover { background: var(--pink-l); }
+
+  section { padding: 44px 0; border-top: 1px solid var(--line); }
+  section h2 { font-size: 20px; margin-bottom: 22px; }
+  section h2::before { content: "▌ "; color: var(--pink); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  .card h3 { font-size: 14px; margin-bottom: 8px; }
+  .card h3::before { content: "◆ "; color: var(--cyan); }
+  .card p { font-size: 13px; color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 400; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  td code, p code, li code { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; color: var(--cyan-l); font-size: 13px; }
+  .key { color: var(--pink); }
+
+  footer { border-top: 1px solid var(--line); padding: 26px 0; color: var(--muted); font-size: 13px; display: flex; gap: 20px; flex-wrap: wrap; }
+  footer .grow { flex: 1; }
+
+  @media (max-width: 760px) {
+    .hero { grid-template-columns: 1fr; }
+    .hero img { width: 220px; margin: 0 auto; }
+    header nav { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <img src="icon.png" alt="aimon logo">
+    <div class="name">aimon<span>_</span></div>
+    <nav>
+      <a href="#why">why</a>
+      <a href="#features">features</a>
+      <a href="#install">install</a>
+      <a href="https://github.com/CarlosDanielDev/aimon">github</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <div>
+      <div class="badges">
+        <img src="https://img.shields.io/github/actions/workflow/status/CarlosDanielDev/aimon/ci.yml?branch=main&label=ci&style=flat-square" alt="ci">
+        <img src="https://img.shields.io/github/v/release/CarlosDanielDev/aimon?style=flat-square" alt="release">
+        <img src="https://img.shields.io/github/license/CarlosDanielDev/aimon?style=flat-square" alt="license">
+      </div>
+      <h1>Watch what your<br>AI agents <em>spawn.</em><br>Kill what they leave behind.</h1>
+      <p class="tag">A session dies mid <code>vitest</code>. Its workers get re-parented to launchd,
+      vanish from your tmux tree, and quietly eat your RAM. aimon sees them, warns you before
+      memory pressure goes critical, and reaps the orphans.</p>
+      <div class="install">
+        <code id="cmd">cargo install --git https://github.com/CarlosDanielDev/aimon</code>
+        <button onclick="navigator.clipboard.writeText(document.getElementById('cmd').textContent)">copy</button>
+      </div>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/CarlosDanielDev/aimon/releases/latest">download binary</a>
+        <a class="btn" href="https://github.com/CarlosDanielDev/aimon">source</a>
+      </div>
+    </div>
+    <img src="mascot.png" alt="aimon mascot: a pixel guardian creature sweeps orphan processes away">
+  </div>
+
+  <section id="why">
+    <h2>the usual crime scene</h2>
+    <div class="cards">
+      <div class="card"><h3>the orphan</h3><p>A coding agent dies or gets interrupted mid-run. Its test
+      runners, MCP servers and build workers keep running — re-parented to launchd, invisible in tmux.</p></div>
+      <div class="card"><h3>the cover-up</h3><p>Activity Monitor blames iTerm2. Your fan spins. The swap
+      file grows. Nobody knows which process is the guilty one.</p></div>
+      <div class="card"><h3>the guardian</h3><p>aimon groups every process by agent, marks the orphans,
+      warns before pressure goes critical, and kills the guilty tree — TERM, then KILL, always logged.</p></div>
+    </div>
+  </section>
+
+  <section id="features">
+    <h2>features</h2>
+    <div class="cards">
+      <div class="card"><h3>agent-aware tree</h3><p>Detects Claude Code, Codex, Gemini CLI, Aider,
+      OpenCode, cursor-agent, Amp, Goose, Crush, Qwen, Copilot and Droid — in tmux or outside it —
+      and groups every child under its agent.</p></div>
+      <div class="card"><h3>auto-kill policy</h3><p>Orphaned tool workers die after a grace period.
+      Under critical memory pressure, the heaviest target goes first. Protected processes are
+      refused in a single funnel — shells and editors are never touched.</p></div>
+      <div class="card"><h3>confirmed kills</h3><p>Every kill path opens the same popup: rows arrive
+      pre-marked, space toggles, enter fires, esc cancels. The cursor follows its process when
+      the list re-sorts — it never kills the row that moved under it.</p></div>
+      <div class="card"><h3>receipts</h3><p>Kills are SIGTERM, then SIGKILL 2 s later. Every kill sends
+      a native notification and lands in <code>~/.local/state/aimon/kills.log</code>.</p></div>
+      <div class="card"><h3>cross-platform</h3><p>macOS kernel pressure level, Linux PSI, Windows
+      fallback. Static musl binaries, universal macOS, x86_64 Windows — all attached to every release.</p></div>
+      <div class="card"><h3>tiny</h3><p>~600 KB binary, ~6 MB RSS, ~0.1% CPU idle. Samples 2.5× slower
+      when your terminal loses focus.</p></div>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2>keys &amp; flags</h2>
+    <table>
+      <tr><th>key</th><th>action</th></tr>
+      <tr><td><span class="key">↑↓</span> / <span class="key">jk</span></td><td>navigate</td></tr>
+      <tr><td><span class="key">x</span></td><td>kill selected — opens the confirm popup</td></tr>
+      <tr><td><span class="key">X</span></td><td>kill the group's dev processes</td></tr>
+      <tr><td><span class="key">p</span></td><td>panic: every pre-marked target, confirmed</td></tr>
+      <tr><td><span class="key">a</span> · <span class="key">t</span> · <span class="key">q</span></td><td>toggle auto · theme (neon/matrix) · quit</td></tr>
+    </table>
+    <p style="margin-top: 18px; font-size: 14px; color: var(--muted);">
+      Flags: <code>--rss-limit-mb N</code> (panic threshold, 500) ·
+      <code>--orphan-grace-s N</code> (60) · <code>--tick-ms N</code> (2000) ·
+      <code>--daemon</code> (headless) · <code>--no-auto</code>. <code>NO_COLOR</code> is honored.
+    </p>
+  </section>
+
+  <footer>
+    <span>aimon — GPL-3.0-or-later</span>
+    <span class="grow"></span>
+    <a href="https://github.com/CarlosDanielDev/aimon">source</a>
+    <a href="https://github.com/CarlosDanielDev/aimon/releases/latest">releases</a>
+  </footer>
+
+</div>
+</body>
+</html>
