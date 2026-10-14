@@ -1,6 +1,12 @@
 # aimon
 
-<p align="center"><img src="assets/mascot.svg" width="220" alt="aimon mascot pixel art: a tiny terminal window watches its memory gauge fill, then zaps the orphan-process ghost"></p>
+[![ci](https://img.shields.io/github/actions/workflow/status/CarlosDanielDev/aimon/ci.yml?branch=main&label=ci&style=flat-square)](https://github.com/CarlosDanielDev/aimon/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/CarlosDanielDev/aimon?style=flat-square)](https://github.com/CarlosDanielDev/aimon/releases/latest)
+[![license](https://img.shields.io/github/license/CarlosDanielDev/aimon?style=flat-square)](LICENSE)
+![platform](https://img.shields.io/badge/platform-macos%20%7C%20linux%20%7C%20windows-2ea4a4?style=flat-square)
+![rust](https://img.shields.io/badge/rust-2024%20edition-dea584?style=flat-square&logo=rust&logoColor=white)
+
+<p align="center"><img src="assets/mascot.svg" width="220" alt="aimon mascot pixel art: a teal guardian creature zaps an orphan-process ghost with its bolt tail before its belly gauge maxes out"></p>
 
 Tiny TUI that shows what your terminal coding agents (Claude Code, Codex, Gemini CLI, Aider,
 OpenCode, cursor-agent, Amp, Goose, Crush, Qwen, Copilot, Droid — in tmux or not) spawned, warns before
