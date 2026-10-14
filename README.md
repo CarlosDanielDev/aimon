@@ -81,4 +81,7 @@ Windows (x86_64) binaries with their sha256s.
 
 [GPL-3.0-or-later](LICENSE)
 
-<p align="center"><a href="https://viberank.dev/apps/aimon" target="_blank" rel="noopener noreferrer"><img src="https://viberank.dev/badge?app=aimon&theme=dark" alt="aimon on VibeRank" /></a></p>
+<p align="center">
+  <a href="https://viberank.dev/apps/aimon" target="_blank" rel="noopener noreferrer"><img src="https://viberank.dev/badge?app=aimon&theme=dark" alt="aimon on VibeRank" /></a>
+  <a href="https://devhunt.org/tool/aimon" target="_blank" title="aimon on DevHunt"><img src="https://devhunt.org/badge/aimon.svg" alt="aimon - Featured on DevHunt" width="220" height="54" /></a>
+</p>
