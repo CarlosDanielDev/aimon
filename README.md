@@ -6,7 +6,6 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/CarlosDanielDev/aimon?style=flat-square" alt="license" height="20"></a>
   <img src="https://img.shields.io/badge/platform-macos%20%7C%20linux%20%7C%20windows-2ea4a4?style=flat-square" alt="platform" height="20">
   <img src="https://img.shields.io/badge/rust-2024%20edition-dea584?style=flat-square&logo=rust&logoColor=white" alt="rust" height="20">
-  <a href="https://viberank.dev/apps/aimon" target="_blank" rel="noopener noreferrer"><img src="https://viberank.dev/badge?app=aimon&theme=dark" alt="aimon on VibeRank" height="20"></a>
 </p>
 
 <p align="center"><img src="assets/mascot.png" width="260" alt="aimon mascot: a pixel guardian creature sweeps orphan processes away"></p>
@@ -81,3 +80,5 @@ Windows (x86_64) binaries with their sha256s.
 ## License
 
 [GPL-3.0-or-later](LICENSE)
+
+<p align="center"><a href="https://viberank.dev/apps/aimon" target="_blank" rel="noopener noreferrer"><img src="https://viberank.dev/badge?app=aimon&theme=dark" alt="aimon on VibeRank" /></a></p>
