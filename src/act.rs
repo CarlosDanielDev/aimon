@@ -236,9 +236,10 @@ fn notify(msg: &str) {
 /// Linux desktop notification. Silently absent when notify-send is not installed.
 #[cfg(target_os = "linux")]
 fn notify(msg: &str) {
+    let msg = msg.to_string(); // owned: the banner thread outlives this borrow
     std::thread::spawn(move || {
         let _ = Command::new("notify-send")
-            .args(["-a", "aimon", "aimon", msg])
+            .args(["-a", "aimon", "aimon", &msg])
             .status();
     });
 }
