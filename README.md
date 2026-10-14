@@ -1,11 +1,13 @@
 # aimon
 
-[![ci](https://img.shields.io/github/actions/workflow/status/CarlosDanielDev/aimon/ci.yml?branch=main&label=ci&style=flat-square)](https://github.com/CarlosDanielDev/aimon/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/v/release/CarlosDanielDev/aimon?style=flat-square)](https://github.com/CarlosDanielDev/aimon/releases/latest)
-[![license](https://img.shields.io/github/license/CarlosDanielDev/aimon?style=flat-square)](LICENSE)
-![platform](https://img.shields.io/badge/platform-macos%20%7C%20linux%20%7C%20windows-2ea4a4?style=flat-square)
-![rust](https://img.shields.io/badge/rust-2024%20edition-dea584?style=flat-square&logo=rust&logoColor=white)
-<a href="https://viberank.dev/apps/aimon" target="_blank" rel="noopener noreferrer"><img src="https://viberank.dev/badge?app=aimon&theme=dark" alt="aimon on VibeRank" /></a>
+<p align="left">
+  <a href="https://github.com/CarlosDanielDev/aimon/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/CarlosDanielDev/aimon/ci.yml?branch=main&label=ci&style=flat-square" alt="ci" height="20"></a>
+  <a href="https://github.com/CarlosDanielDev/aimon/releases/latest"><img src="https://img.shields.io/github/v/release/CarlosDanielDev/aimon?style=flat-square" alt="release" height="20"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/CarlosDanielDev/aimon?style=flat-square" alt="license" height="20"></a>
+  <img src="https://img.shields.io/badge/platform-macos%20%7C%20linux%20%7C%20windows-2ea4a4?style=flat-square" alt="platform" height="20">
+  <img src="https://img.shields.io/badge/rust-2024%20edition-dea584?style=flat-square&logo=rust&logoColor=white" alt="rust" height="20">
+  <a href="https://viberank.dev/apps/aimon" target="_blank" rel="noopener noreferrer"><img src="https://viberank.dev/badge?app=aimon&theme=dark" alt="aimon on VibeRank" height="20"></a>
+</p>
 
 <p align="center"><img src="assets/mascot.png" width="260" alt="aimon mascot: a pixel guardian creature sweeps orphan processes away"></p>
 
