@@ -50,8 +50,8 @@ GHOST = [
     "y.y..y.y.",
 ]
 # tail tip -> ghost arc, lit while zapping
-ZAP_CELLS = [(43, 15), (43, 14), (42, 13), (41, 12)]
-STAR_CELLS = [(43, 3), (45, 8), (38, 4), (45, 11)]
+ZAP_CELLS = [(43, 18), (43, 16), (42, 14), (42, 12)]
+STAR_CELLS = [(44, 3), (46, 9), (39, 4), (46, 12)]
 
 
 class Grid:
@@ -84,10 +84,10 @@ class Grid:
                     if ((x - cx + 1.5) / (r - 1)) ** 2 + ((y - cy + 1.5) / (r - 1)) ** 2 > 1.0:
                         if self.px.get((x, y)) == fill:
                             self.put(x, y, shade)
-        if light is not None:  # small crescent, top-left
+        if light is not None:  # thin crescent, top-left
             for y in range(int(cy - r), int(cy + r) + 1):
                 for x in range(int(cx - r), int(cx + r) + 1):
-                    if ((x - cx - 1.5) / (r - 1)) ** 2 + ((y - cy - 1.5) / (r - 1)) ** 2 > 1.0:
+                    if ((x - cx - 2.0) / (r - 1)) ** 2 + ((y - cy - 2.0) / (r - 1)) ** 2 > 1.0:
                         if self.px.get((x, y)) == fill and x <= cx and y <= cy:
                             self.put(x, y, light)
 
@@ -133,17 +133,17 @@ def ghost_alpha(t: float) -> float:
     return (t - 0.92) / 0.08
 
 
-TAIL = [  # zigzag bolt tail hugging the right hip, bottom to top; tip charges and fires
-    (30, 40), (31, 40), (31, 39), (32, 39),
-    (32, 38), (33, 38), (33, 37), (34, 37),
-    (34, 36), (35, 36), (35, 35), (36, 35),
-    (36, 34), (37, 34), (37, 33), (38, 33),
-    (38, 32), (39, 32), (39, 31), (40, 31),
-    (40, 30), (41, 30), (41, 29), (42, 29),
-    (42, 28), (43, 28), (43, 27), (44, 27),
-    (44, 26), (45, 26), (45, 25), (46, 25),
-    (46, 24), (46, 23), (45, 22), (45, 21),
-    (44, 20), (44, 19), (43, 18), (43, 17),
+TAIL = [  # thick zigzag bolt tail, hip to shoulder blade; the tip charges and fires
+    (31, 41), (32, 41), (32, 40), (33, 40),
+    (33, 39), (34, 39), (34, 38), (35, 38),
+    (34, 37), (35, 37), (33, 36), (34, 36),
+    (33, 35), (34, 35), (34, 34), (35, 34),
+    (35, 33), (36, 33), (36, 32), (37, 32),
+    (37, 31), (38, 31), (38, 30), (39, 30),
+    (39, 29), (40, 29), (40, 28), (41, 28),
+    (41, 27), (42, 27), (42, 26), (43, 26),
+    (43, 25), (44, 25), (44, 24), (45, 24),
+    (45, 23), (44, 22), (44, 21), (43, 20),
 ]
 
 
@@ -167,31 +167,31 @@ def draw(t: float) -> Grid:
     g.ball(15, 43 + y, 2, BODY, shade=BODY_D)
     g.ball(28, 43 + y, 2, BODY, shade=BODY_D)
 
-    # ears behind the head: left tall + pointy, right notched (it hunts orphans for a living)
-    for x0, x1, yy in [(12, 14, 4), (12, 15, 5), (11, 16, 6), (11, 16, 7), (11, 16, 8)]:
+    # ears: solid triangles leaning out; pink inner near the tip; right one notched
+    for x0, x1, yy in [(13, 13, 3), (12, 14, 4), (11, 15, 5), (10, 16, 6), (10, 17, 7), (10, 18, 8)]:
         g.rect(x0, yy + y, x1, yy + y, OUT)
         g.rect(x0 + 1, yy + y, x1 - 1, yy + y, BODY)
-    g.rect(13, 4 + y, 13, 7 + y, PINK_L)
-    for x0, x1, yy in [(27, 29, 3), (26, 30, 4), (26, 31, 5), (26, 31, 6), (26, 31, 7), (26, 31, 8)]:
+    g.rect(12, 5 + y, 13, 7 + y, PINK_L)
+    for x0, x1, yy in [(29, 29, 3), (28, 30, 4), (27, 31, 5), (26, 32, 6), (26, 33, 7), (26, 34, 8)]:
         g.rect(x0, yy + y, x1, yy + y, OUT)
         g.rect(x0 + 1, yy + y, x1 - 1, yy + y, BODY)
-    g.rect(29, 4 + y, 29, 6 + y, PINK_L)
-    g.rect(29, 6 + y, 31, 7 + y, GROUND + (255,))  # notch bite out of the right ear
+    g.rect(29, 5 + y, 30, 7 + y, PINK_L)
+    g.rect(31, 7 + y, 33, 8 + y, GROUND + (255,))  # notch bite out of the right ear
 
     # body
     g.ellipse(21, 37 + y, 10, 8, OUT)
     g.ellipse(21, 37 + y, 9, 7, BODY)
     g.ellipse(20, 37 + y, 7, 5, BELLY)
-    # arms: tiny nubs
-    g.ball(10, 35 + y, 2, BODY, shade=BODY_D)
-    g.ball(32, 35 + y, 2, BODY, shade=BODY_D)
+    # arms: tiny nubs, one shade lighter than the shadow side
+    g.rect(9, 34 + y, 10, 36 + y, BODY_L)
+    g.rect(32, 34 + y, 33, 36 + y, BODY_L)
 
     # tail root sits on the body's right hip, so the bolt grows out of it
     for i, (x, yy) in enumerate(TAIL):
         g.put(x, yy + y, BRAND if i < len(TAIL) - 6 else charge)
 
     # belly meter: the gauge IS its tummy
-    g.rect(15, 36 + y, 27, 37 + y, INK)
+    g.rect(15, 36 + y, 27, 37 + y, BODY_D)
     w = round(12 * frac)
     if w:
         c = gauge_color(frac)
@@ -201,39 +201,42 @@ def draw(t: float) -> Grid:
     # head: big round, light crescent
     g.ball(21, 19 + y, 12, BODY, shade=BODY_D, light=BODY_L)
 
-    # face
+    # face: solid dark eyes with big white highlights — the cute-sprite formula
     blink = 0.44 <= t < 0.50
     squint = frac >= 0.85 or zapping
-    for ex in (13, 24):
-        if blink and not happy:
-            g.rect(ex, 19 + y, ex + 4, 19 + y, INK)
+    for ex in (12, 25):
+        if happy:
+            # ^ ^ arc eyes
+            for dx, dy in ((0, 2), (1, 1), (2, 1), (3, 2)):
+                g.put(ex + dx, 16 + dy + y, INK)
+                g.put(ex + dx, 17 + dy + y, INK)
             continue
-        # white + cyan iris + pupil + sparkle, pokemon-scale
-        g.ellipse(ex + 2, 19 + y, 2, 3, WHITE)
-        g.ellipse(ex + 2, 20 + y, 1, 2, ACCENT if not squint else CYAN_L)
-        g.put(ex + 2 + (1 if squint else 0), 20 + y, INK if squint else INK)
-        g.put(ex + 1, 18 + y, WHITE)  # sparkle
+        if blink and not squint:
+            g.rect(ex, 18 + y, ex + 3, 18 + y, INK)
+            continue
+        g.rect(ex, 14 + y, ex + 3, 18 + y, INK)
+        g.put(ex, 14 + y, (0x2A, 0x3A, 0x55, 255))
+        g.rect(ex, 14 + y, ex + 1, 15 + y, WHITE)  # big highlight
+        g.put(ex + 3, 18 + y, CYAN_L)  # bottom accent
     if squint:
         # angry brows
-        g.rect(12, 15 + y, 14, 15 + y, INK)
-        g.rect(13, 14 + y, 14, 14 + y, INK)
-        g.rect(25, 14 + y, 26, 14 + y, INK)
-        g.rect(25, 15 + y, 27, 15 + y, INK)
-    # mouth: smirk when working, open grin when happy, flat frown under pressure
+        g.rect(12, 12 + y, 14, 12 + y, INK)
+        g.put(13, 11 + y, INK)
+        g.rect(25, 12 + y, 27, 12 + y, INK)
+        g.put(26, 11 + y, INK)
+    # mouth: tiny cat smile, open grin when happy, flat line under pressure
     if happy:
-        g.rect(19, 25 + y, 24, 26 + y, INK)
-        g.rect(20, 26 + y, 23, 26 + y, BAD)  # tongue
+        g.rect(19, 26 + y, 23, 27 + y, INK)
+        g.rect(20, 27 + y, 22, 27 + y, PINK_L)  # tongue
     elif squint:
-        g.rect(19, 26 + y, 23, 26 + y, INK)
-        g.put(19, 25 + y, INK)
-        g.put(23, 25 + y, INK)
+        g.rect(18, 26 + y, 24, 26 + y, INK)
     else:
-        g.rect(19, 25 + y, 22, 25 + y, INK)
-        g.put(22, 24 + y, INK)  # smirk tip
-        g.put(20, 26 + y, WHITE)  # little fang
+        g.rect(19, 26 + y, 22, 26 + y, INK)
+        g.put(18, 25 + y, INK)
+        g.put(23, 25 + y, INK)
     # cheek gems — teal-cyan, not red cheeks
-    g.rect(10, 24 + y, 11, 25 + y, ACCENT)
-    g.rect(29, 24 + y, 30, 25 + y, ACCENT)
+    g.rect(10, 23 + y, 11, 24 + y, ACCENT)
+    g.rect(30, 23 + y, 31, 24 + y, ACCENT)
 
     # the zap: tail tip -> ghost, impact stars
     if zapping:
@@ -285,17 +288,16 @@ def draw_icon() -> Grid:
     g.rect(38, 5, 38, 9, PINK_L)
     # head ball
     g.ball(24, 26, 17, BODY, shade=BODY_D, light=BODY_L)
-    # eyes: big, sparkly
+    # eyes: solid dark, big white highlight — the cute-sprite formula
     for ex in (14, 27):
-        g.ellipse(ex + 2, 25, 3, 5, WHITE)
-        g.ellipse(ex + 2, 26, 2, 3, ACCENT)
-        g.put(ex + 2, 27, INK)
-        g.put(ex + 1, 23, WHITE)
+        g.rect(ex, 22, ex + 4, 28, INK)
+        g.put(ex, 22, (0x2A, 0x3A, 0x55, 255))
+        g.rect(ex, 22, ex + 1, 23, WHITE)
+        g.put(ex + 4, 28, CYAN_L)
     # smile + gems
     g.rect(21, 34, 27, 34, INK)
     g.put(21, 33, INK)
     g.put(27, 33, INK)
-    g.put(23, 35, WHITE)
     g.rect(6, 32, 7, 33, ACCENT)
     g.rect(40, 32, 41, 33, ACCENT)
     return g
