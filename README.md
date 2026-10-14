@@ -6,7 +6,7 @@
 ![platform](https://img.shields.io/badge/platform-macos%20%7C%20linux%20%7C%20windows-2ea4a4?style=flat-square)
 ![rust](https://img.shields.io/badge/rust-2024%20edition-dea584?style=flat-square&logo=rust&logoColor=white)
 
-<p align="center"><img src="assets/mascot.gif" width="220" alt="aimon mascot pixel art: a teal guardian creature sweeps orphan-process debris while its alert bubble pops"></p>
+<p align="center"><img src="assets/mascot.png" width="260" alt="aimon mascot: a pixel guardian creature sweeps orphan processes away"></p>
 
 Tiny TUI that shows what your terminal coding agents (Claude Code, Codex, Gemini CLI, Aider,
 OpenCode, cursor-agent, Amp, Goose, Crush, Qwen, Copilot, Droid — in tmux or not) spawned, warns before
