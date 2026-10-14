@@ -16,7 +16,7 @@ jobs:
   gate:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           components: rustfmt, clippy
@@ -27,18 +27,84 @@ jobs:
       - run: cargo build --release
 
   # Bump `version` in Cargo.toml and push to main: this tags vX.Y.Z and publishes the release.
-  release:
+  release-build:
     needs: gate
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest # universal: aarch64 + x86_64, lipo'd
+          - os: ubuntu-latest # static musl: x86_64 + aarch64
+          - os: windows-latest # x86_64 msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-musl,aarch64-unknown-linux-musl,x86_64-pc-windows-msvc
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+      - if: runner.os != 'Windows'
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          set -e
+          mkdir -p dist
+          if [ "$RUNNER_OS" = macOS ]; then
+            cargo build --release --target aarch64-apple-darwin
+            cargo build --release --target x86_64-apple-darwin
+            lipo -create -output dist/aimon \
+              target/aarch64-apple-darwin/release/aimon \
+              target/x86_64-apple-darwin/release/aimon
+            v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+            cp README.md LICENSE dist/
+            tar -czf "dist/aimon-v$v-macos-universal.tar.gz" -C dist aimon README.md LICENSE
+            (cd dist && shasum -a 256 "aimon-v$v-macos-universal.tar.gz" > "aimon-v$v-macos-universal.tar.gz.sha256")
+          else
+            cargo build --release --target x86_64-unknown-linux-musl
+            cargo build --release --target aarch64-unknown-linux-musl
+            v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+            cp README.md LICENSE dist/
+            for a in x86_64 aarch64; do
+              cp "target/$a-unknown-linux-musl/release/aimon" "dist/aimon-$a"
+              tar -czf "dist/aimon-v$v-linux-$a.tar.gz" -C dist "aimon-$a" README.md LICENSE
+              (cd dist && sha256sum "aimon-v$v-linux-$a.tar.gz" > "aimon-v$v-linux-$a.tar.gz.sha256")
+            done
+          fi
+        shell: bash
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc
+          $v = (Get-Content Cargo.toml | Where-Object { $_ -match '^version = "(.*)"' } | ForEach-Object { $Matches[1] } | Select-Object -First 1)
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target\x86_64-pc-windows-msvc\release\aimon.exe dist\
+          Copy-Item README.md, LICENSE dist\
+          Compress-Archive -Path dist\aimon.exe, dist\README.md, dist\LICENSE -DestinationPath "dist\aimon-v$v-windows-x86_64.zip"
+          (Get-FileHash "dist\aimon-v$v-windows-x86_64.zip" -Algorithm SHA256).Hash + "  aimon-v$v-windows-x86_64.zip" | Out-File -Encoding ascii "dist\aimon-v$v-windows-x86_64.zip.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-${{ matrix.os }}
+          path: dist/*.tar.gz
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-${{ matrix.os }}-hash
+          path: dist/*.sha256
+          if-no-files-found: ignore
+
+  release-publish:
+    needs: release-build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: version
-        id: v
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - id: v
         run: |
           v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           echo "tag=v$v" >> "$GITHUB_OUTPUT"
@@ -48,30 +114,18 @@ jobs:
           else
             echo "new=true" >> "$GITHUB_OUTPUT"
           fi
-      - if: steps.v.outputs.new == 'true'
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: steps.v.outputs.new == 'true'
         with:
-          targets: aarch64-apple-darwin, x86_64-apple-darwin
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
       # No cache here: a poisoned cache must never reach published binaries.
-      - name: build universal binary
-        if: steps.v.outputs.new == 'true'
+      - if: steps.v.outputs.new == 'true'
         run: |
-          cargo build --release --target aarch64-apple-darwin
-          cargo build --release --target x86_64-apple-darwin
-          mkdir -p dist
-          lipo -create -output dist/aimon \
-            target/aarch64-apple-darwin/release/aimon \
-            target/x86_64-apple-darwin/release/aimon
-          lipo -info dist/aimon
-          name="aimon-${{ steps.v.outputs.tag }}-macos-universal.tar.gz"
-          cp README.md LICENSE dist/
-          tar -czf "dist/$name" -C dist aimon README.md LICENSE
-          (cd dist && shasum -a 256 "$name" > "$name.sha256")
-      - name: tag and release
-        if: steps.v.outputs.new == 'true'
-        run: |
+          ls -la dist
           gh release create "${{ steps.v.outputs.tag }}" \
             --target "$GITHUB_SHA" \
             --title "${{ steps.v.outputs.tag }}" \
             --generate-notes \
-            dist/*.tar.gz dist/*.sha256
+            dist/*.tar.gz dist/*.zip dist/*.sha256

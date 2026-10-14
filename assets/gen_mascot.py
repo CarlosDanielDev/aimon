@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""aimon mascot: a minimal capsule guard whose belly gauge rises with memory pressure until
-it zaps the orphan-process ghost. Claude-Code-style simplicity: one shape, dot eyes, one
-accent detail. Vector primitives only, supersampled 3x, exported as an animated GIF
-(app-directory logo, <=2MB) plus a static PNG.
+"""aimon mascot, pixel art: the TUI itself is the guard. A tiny terminal window watches its
+belly gauge climb while an orphan-process ghost feeds on it; the window zaps the ghost,
+pressure drops, the ghost respawns. 32x32 grid upscaled 16x — GIF (app logo, ~20 KB), PNG,
+and an animated SVG, all from this one grid.
 
 Run: /tmp/aimon-venv/bin/python assets/gen_mascot.py
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 # Theme (src/theme.rs neon)
 GROUND = (0x0B, 0x0E, 0x1A)
@@ -23,12 +23,33 @@ WARN = (0xFF, 0xB0, 0x00)
 BAD = (0xFF, 0x38, 0x60)
 MUTED = (0x8A, 0x98, 0xC4)
 
-SIZE = 512
-S = 3  # supersample
+GRID = 32
+SCALE = 16
 FPS = 25
 FRAMES = 75  # 3s loop
 
-GHOST = (410, 138)  # center of the orphan ghost
+# Ghost sprite top-left: right side, inside the frame.
+GHOST = (21, 20)
+BOLT_CELLS = [(26, 9), (25, 10), (26, 11), (24, 12), (25, 13), (24, 14), (23, 15), (23, 16), (23, 17)]
+
+
+class Grid:
+    def __init__(self) -> None:
+        self.px: dict[tuple[int, int], tuple[int, ...]] = {}
+
+    def put(self, x: int, y: int, c: tuple[int, ...]) -> None:
+        if 0 <= x < GRID and 0 <= y < GRID:
+            self.px[(x, y)] = c
+
+    def rect(self, x0: int, y0: int, x1: int, y1: int, c: tuple[int, ...]) -> None:
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                self.put(x, y, c)
+
+    def to_image(self) -> Image.Image:
+        img = Image.new("RGBA", (GRID, GRID))
+        img.putdata([self.px.get((x, y), (*GROUND, 255)) for y in range(GRID) for x in range(GRID)])
+        return img
 
 
 def lerp(a: float, b: float, t: float) -> float:
@@ -40,12 +61,11 @@ def ease(t: float) -> float:
 
 
 def gauge_frac(t: float) -> float:
-    """Pressure rises while the orphan runs, collapses when the zap lands."""
     if t < 0.68:
-        return lerp(0.12, 1.0, ease(t / 0.68))
+        return t / 0.68
     if t < 0.85:
-        return lerp(1.0, 0.12, ease((t - 0.68) / 0.17))
-    return 0.12
+        return 1.0 - ease((t - 0.68) / 0.17)
+    return 0.0
 
 
 def gauge_color(f: float) -> tuple[int, int, int]:
@@ -66,137 +86,134 @@ def ghost_alpha(t: float) -> float:
     return (t - 0.92) / 0.08
 
 
-def draw_frame(t: float) -> Image.Image:
-    img = Image.new("RGBA", (SIZE * S, SIZE * S), GROUND + (255,))
-    d = ImageDraw.Draw(img, "RGBA")
-
-    def rr(box, r, **kw):
-        d.rounded_rectangle([c * S for c in box], radius=r * S, **kw)
-
+def draw(t: float) -> Grid:
+    g = Grid()
     frac = gauge_frac(t)
     zapping = 0.68 <= t < 0.80
 
-    gx, gy = GHOST[0], GHOST[1] + 5 * math.sin(2 * math.pi * t)  # bob
-    ga = ghost_alpha(t)
+    # window frame, title bar, traffic lights
+    g.rect(2, 6, 29, 25, MUTED)
+    g.rect(3, 7, 28, 24, PANEL)
+    g.rect(3, 7, 28, 8, BRAND)
+    for i, c in enumerate((BAD, WARN, OK)):
+        g.put(4 + i * 2, 8, c)
 
-    # --- bolt: antenna tip -> ghost ---
-    if zapping:
-        p = (t - 0.68) / 0.12
-        pts = [(256, 108), (310, 122), (362, 114), (gx, gy + 12)]
-        d.line(
-            [(x * S, y * S) for x, y in pts],
-            fill=BRAND + (int(255 * min(1, 1.3 - p)),),
-            width=7 * S,
-            joint="curve",
-        )
-
-    # --- ghost ---
-    if ga > 0:
-        g = int(235 * ga)
-        body = WARN + (g,)
-        r = 26
-        d.pieslice([(gx - r) * S, (gy - r) * S, (gx + r) * S, (gy + r) * S], 180, 360, fill=body)
-        d.rectangle([(gx - r) * S, gy * S, (gx + r) * S, (gy + 16) * S], fill=body)
-        zig = [(gx - r + i * r / 2, gy + (16 if i % 2 == 0 else 8)) for i in range(5)]
-        zig += [(gx + r, gy + 16), (gx - r, gy + 16)]
-        d.polygon([(x * S, y * S) for x, y in zig], fill=body)
-        if zapping:  # X eyes
-            for ex in (gx - 10, gx + 10):
-                d.line(
-                    [(ex - 4) * S, (gy - 9) * S, (ex + 4) * S, (gy - 1) * S],
-                    fill=BAD + (g,),
-                    width=3 * S,
-                )
-                d.line(
-                    [(ex + 4) * S, (gy - 9) * S, (ex - 4) * S, (gy - 1) * S],
-                    fill=BAD + (g,),
-                    width=3 * S,
-                )
+    # eyes: 2x3 blocks; blink flattens them to one row; glance shifts one col toward the ghost
+    look = 1 if 0.60 <= t < 0.75 else 0
+    blink = 0.44 <= t < 0.50
+    for ex in (9, 19):
+        if blink:
+            g.rect(ex + look, 13, ex + 1 + look, 13, ACCENT)
         else:
-            for ex in (gx - 10, gx + 10):
-                d.ellipse(
-                    [(ex - 4) * S, (gy - 10) * S, (ex + 4) * S, (gy - 2) * S],
-                    fill=GROUND + (g,),
-                )
+            g.rect(ex + look, 11, ex + 1 + look, 13, ACCENT)
 
-    # --- poof ring ---
-    if 0.76 <= t < 0.92:
+    # belly gauge: track x6..25, fill grows right, color follows pressure
+    g.rect(6, 17, 25, 18, MUTED)
+    g.rect(7, 17, 24, 18, GROUND)
+    w = round(18 * frac)
+    if w:
+        g.rect(7, 17, 7 + w - 1, 18, gauge_color(frac))
+
+    # bolt zigzag from the title bar down the right edge to the ghost
+    if zapping:
+        for x, y in BOLT_CELLS:
+            g.put(x, y, BRAND)
+
+    # ghost sprite, bobbing one row
+    gy = GHOST[1] + (1 if math.sin(2 * math.pi * t) > 0 else 0)
+    if ghost_alpha(t) > 0.5:
+        for dy, row in enumerate([".###.", "#####", "#e#e#", "#####", "#.#.#"]):
+            for dx, cell in enumerate(row):
+                if cell == "#":
+                    g.put(GHOST[0] + dx, gy + dy, WARN)
+        for ex_off in (1, 3):  # eye pixels: dark, X-red while zapped
+            g.put(GHOST[0] + ex_off, gy + 2, BAD if zapping else GROUND)
+    elif 0.76 <= t < 0.92:
+        # poof: hollow square, then a red X fading over it
         p = (t - 0.76) / 0.16
-        r = lerp(24, 62, p)
-        d.ellipse(
-            [(gx - r) * S, (gy - r) * S, (gx + r) * S, (gy + r) * S],
-            outline=MUTED + (int(220 * (1 - p)),),
-            width=max(1, int(4 * (1 - p))) * S,
+        cx, cy = GHOST[0] + 2, GHOST[1] + 2
+        r = 2 if p < 0.5 else 3
+        for i in range(-r, r + 1):
+            for x, y in ((cx + i, cy - r), (cx + i, cy + r), (cx - r, cy + i), (cx + r, cy + i)):
+                if 3 <= x <= 28 and 9 <= y <= 24:
+                    g.put(x, y, MUTED)
+        if p > 0.4:
+            for dx, dy in ((-1, -1), (1, -1), (0, 0), (-1, 1), (1, 1)):
+                g.put(cx + dx, cy + dy, BAD)
+
+    return g
+
+
+def svg_static_cells() -> list[str]:
+    """Every non-background pixel of the static frame (t=0.15) as one SVG rect."""
+    cells = []
+    for (x, y), c in sorted(draw(0.15).px.items()):
+        cells.append(f'<rect x="{x}" y="{y}" width="1" height="1" fill="#{c[0]:02x}{c[1]:02x}{c[2]:02x}"/>')
+    return cells
+
+
+def svg_frame() -> str:
+    """Static pixel base + SMIL groups for bolt, X-eyes, poof and blink."""
+    def anim(opacity_values: str, key_times: str) -> str:
+        return (
+            f'<animate attributeName="opacity" values="{opacity_values}" keyTimes="{key_times}" '
+            'dur="3s" repeatCount="indefinite"/>'
         )
 
-    # --- antenna ---
-    d.line([256 * S, 152 * S, 256 * S, 108 * S], fill=BRAND, width=5 * S)
-    d.ellipse(
-        [(256 - 10) * S, 98 * S, (256 + 10) * S, 118 * S],
-        fill=BRAND if zapping else ACCENT,
-    )
-
-    # --- body: one capsule ---
-    rr((166, 150, 346, 392), 70, fill=PANEL, outline=BRAND, width=6)
-
-    # --- eyes: two dots, a blink, a glance ---
-    look = 4 * math.sin(2 * math.pi * t * 0.5)
-    if 0.60 <= t < 0.75:
-        look = 6  # watch the ghost
-    blink = 1.0
-    if 0.44 <= t < 0.50:
-        blink = abs(math.cos(math.pi * (t - 0.44) / 0.06))
-    for ex in (222, 290):
-        ry = 12 * blink
-        d.ellipse(
-            [(ex - 11) * S, (208 - ry) * S, (ex + 11) * S, (208 + ry) * S],
-            fill=ACCENT,
+    out = [
+        '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 32 32" '
+        'shape-rendering="crispEdges" role="img" aria-label="aimon mascot pixel art: a tiny '
+        'terminal window watches its memory gauge fill, then zaps the orphan-process ghost">',
+        "<!-- Generated by assets/gen_mascot.py -->",
+        f'<rect width="{GRID}" height="{GRID}" fill="#0b0e1a"/>',
+        *svg_static_cells(),
+        # blink overlays (hide the top two rows of each eye)
+        '<rect x="9" y="11" width="2" height="2" fill="#141a2e" opacity="0">'
+        + anim("0;0;1;0;0", "0;0.44;0.46;0.50;1") + "</rect>",
+        '<rect x="19" y="11" width="2" height="2" fill="#141a2e" opacity="0">'
+        + anim("0;0;1;0;0", "0;0.44;0.46;0.50;1") + "</rect>",
+        # bolt
+        f'<g fill="#{BRAND[0]:02x}{BRAND[1]:02x}{BRAND[2]:02x}" opacity="0">'
+        + "".join(f'<rect x="{x}" y="{y}" width="1" height="1"/>' for x, y in BOLT_CELLS)
+        + anim("0;0;1;1;0;0", "0;0.68;0.70;0.78;0.80;1") + "</g>",
+        # ghost X-eyes
+        '<g fill="#ff3860" opacity="0"><rect x="22" y="22" width="1" height="1"/>'
+        '<rect x="24" y="22" width="1" height="1"/>'
+        + anim("0;0;1;1;0;0", "0;0.68;0.70;0.78;0.80;1") + "</g>",
+        # poof ring + X
+        '<g fill="#8a98c4" opacity="0">'
+        + "".join(
+            f'<rect x="{GHOST[0] + 2 + dx}" y="{GHOST[1] + 2 + dy}" width="1" height="1"/>'
+            for dx, dy in [(-2, 0), (2, 0), (0, -2), (0, 2), (-3, 0), (3, 0), (0, -3), (0, 3)]
         )
-        d.ellipse(
-            [(ex - 4 + look) * S, (208 - 5 * blink) * S, (ex + 4 + look) * S, (208 + 5 * blink) * S],
-            fill=GROUND,
+        + anim("0;0;1;0;0", "0;0.76;0.82;0.90;1") + "</g>",
+        '<g fill="#ff3860" opacity="0">'
+        + "".join(
+            f'<rect x="{GHOST[0] + 2 + dx}" y="{GHOST[1] + 2 + dy}" width="1" height="1"/>'
+            for dx, dy in [(-1, -1), (1, -1), (0, 0), (-1, 1), (1, 1)]
         )
-
-    # --- belly gauge ---
-    rr((196, 330, 316, 348), 9, fill=GROUND, outline=MUTED + (110,), width=2)
-    if frac > 0.04:
-        rr(
-            (200, 334, lerp(200, 312, frac), 344),
-            5,
-            fill=gauge_color(frac),
-        )
-
-    # --- wordmark ---
-    d.text((256 * S, 462 * S), "aimon", font=font(40), anchor="mm", fill=BRAND)
-
-    return img.resize((SIZE, SIZE), Image.LANCZOS)
-
-
-_font_cache: dict[int, ImageFont.FreeTypeFont] = {}
-
-
-def font(px: int) -> ImageFont.FreeTypeFont:
-    if px not in _font_cache:
-        _font_cache[px] = ImageFont.truetype("/System/Library/Fonts/Menlo.ttc", px * S)
-    return _font_cache[px]
+        + anim("0;0;1;0;0", "0;0.80;0.84;0.92;1") + "</g>",
+        "</svg>",
+    ]
+    return "\n".join(out)
 
 
 def main() -> None:
     out = Path(__file__).parent
-    frames = [draw_frame(i / FRAMES).convert("P", palette=Image.ADAPTIVE, colors=96) for i in range(FRAMES)]
+    big = [draw(i / FRAMES).to_image().resize((GRID * SCALE, GRID * SCALE), Image.NEAREST) for i in range(FRAMES)]
+    pal = [f.convert("P", palette=Image.ADAPTIVE, colors=32) for f in big]
     gif = out / "mascot.gif"
-    frames[0].save(
+    pal[0].save(
         gif,
         save_all=True,
-        append_images=frames[1:],
+        append_images=pal[1:],
         duration=int(1000 / FPS),
         loop=0,
         optimize=True,
-        disposal=2,
     )
-    draw_frame(0.15).convert("RGB").save(out / "mascot-512.png", optimize=True)
-    kb = gif.stat().st_size / 1024
-    print(f"{gif.name}: {kb:.0f} KB, {FRAMES} frames @ {FPS} fps")
+    big[int(0.15 * FRAMES)].convert("RGB").save(out / "mascot-512.png", optimize=True)
+    (out / "mascot.svg").write_text(svg_frame())
+    print(f"{gif.name}: {gif.stat().st_size / 1024:.0f} KB, {FRAMES} frames @ {FPS} fps")
 
 
 if __name__ == "__main__":

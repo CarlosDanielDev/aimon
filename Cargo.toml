@@ -1,6 +1,6 @@
 [package]
 name = "aimon"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "Tiny TUI that watches what terminal coding agents spawn and kills orphaned workers before macOS runs out of memory"
@@ -8,8 +8,10 @@ repository = "https://github.com/CarlosDanielDev/aimon"
 
 [dependencies]
 ratatui = "0.30"
-sysctl = "0.7"
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+sysctl = "0.7"
 
 [profile.release]
 opt-level = "s"

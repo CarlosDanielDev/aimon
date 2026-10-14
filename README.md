@@ -1,20 +1,22 @@
 # aimon
 
-<p align="center"><img src="assets/mascot.svg" width="220" alt="aimon mascot: a guard robot zaps an orphan process before memory pressure goes critical"></p>
+<p align="center"><img src="assets/mascot.svg" width="220" alt="aimon mascot pixel art: a tiny terminal window watches its memory gauge fill, then zaps the orphan-process ghost"></p>
 
 Tiny TUI that shows what your terminal coding agents (Claude Code, Codex, Gemini CLI, Aider,
 OpenCode, cursor-agent, Amp, Goose, Crush, Qwen, Copilot, Droid — in tmux or not) spawned, warns before
-macOS runs out of memory, and kills the leftovers before they freeze the machine.
+your machine runs out of memory, and kills the leftovers before they freeze it.
 
 The usual culprit: a session dies or is interrupted mid `vitest`/`jest`/`tsserver`/MCP run, the
 workers get re-parented to launchd (PPID 1), vanish from the tmux tree, and keep eating RAM.
 Activity Monitor blames iTerm2.
 
-~600 KB binary, ~6 MB RSS, ~0.1% CPU idle. macOS only.
+~600 KB binary, ~6 MB RSS, ~0.1% CPU idle. macOS, Linux and Windows.
 
 ## Install
 
-Universal macOS binary from [releases](https://github.com/CarlosDanielDev/aimon/releases/latest), or:
+Statically-linked binaries from [releases](https://github.com/CarlosDanielDev/aimon/releases/latest):
+`aimon-vX.Y.Z-macos-universal.tar.gz`, `aimon-vX.Y.Z-linux-x86_64.tar.gz`,
+`aimon-vX.Y.Z-linux-aarch64.tar.gz`, `aimon-vX.Y.Z-windows-x86_64.zip` — or:
 
 ```sh
 cargo install --git https://github.com/CarlosDanielDev/aimon
@@ -49,11 +51,13 @@ under it. `NO_COLOR` is honored.
 - **Orphan runtime** (`node`, `python`, `bun`, …): shown in ORPHANS but never pre-marked or
   auto-killed, since it may be a daemon you started on purpose. Kill it with `x`.
 - **Heavy child of an agent** (a dev process above `--rss-limit-mb`): pre-marked in panic.
-- **Critical memory pressure** (`kern.memorystatus_vm_pressure_level`): auto mode kills the
-  heaviest panic target every 10 s until pressure drops.
+- **Critical memory pressure:** auto mode kills the heaviest panic target every 10 s until
+  pressure drops. macOS reads `kern.memorystatus_vm_pressure_level`, Linux reads PSI
+  (`/proc/pressure/memory`); Windows has no kernel pressure signal, so the critical rule is off
+  there — orphan reaping, panic and manual kills all still work (kills are immediate Terminate).
 
-Kills are SIGTERM, then SIGKILL 2 s later. Every kill sends a macOS notification and appends a
-line to `~/.local/state/aimon/kills.log`.
+Kills are SIGTERM, then SIGKILL 2 s later (Windows: TerminateProcess). Every kill sends a native
+notification and appends a line to `~/.local/state/aimon/kills.log`.
 
 ## Develop
 
@@ -62,7 +66,8 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
 CI runs that gate on every push and PR. To release, bump `version` in `Cargo.toml` and push to
-`main`: CI tags `vX.Y.Z` and publishes a universal (arm64 + x86_64) binary with its sha256.
+`main`: CI tags `vX.Y.Z` and publishes macOS (universal), Linux (x86_64 + aarch64, musl) and
+Windows (x86_64) binaries with their sha256s.
 
 ## License
 

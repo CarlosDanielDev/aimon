@@ -17,6 +17,17 @@ const KILL_AFTER: Duration = Duration::from_secs(2);
 const CRITICAL_COOLDOWN: Duration = Duration::from_secs(10);
 const EVENTS: usize = 50;
 
+/// The graceful signal: TERM everywhere it exists; Windows only has Kill.
+#[cfg(unix)]
+fn term_signal() -> Signal {
+    Signal::Term
+}
+
+#[cfg(not(unix))]
+fn term_signal() -> Signal {
+    Signal::Kill
+}
+
 struct Pending {
     pid: u32,
     start: u64,
@@ -135,7 +146,7 @@ impl Actor {
             if !seen.insert(pid) {
                 continue;
             }
-            if s.signal(pid, start, Signal::Term) {
+            if s.signal(pid, start, term_signal()) {
                 self.pending.push(Pending {
                     pid,
                     start,
@@ -210,7 +221,8 @@ impl Actor {
     }
 }
 
-/// Native macOS banner. Runs off-thread so a slow osascript never stalls the loop.
+/// OS banner. Runs off-thread so a slow notifier never stalls the loop.
+#[cfg(target_os = "macos")]
 fn notify(msg: &str) {
     let script = format!(
         "display notification \"{}\" with title \"aimon\"",
@@ -219,4 +231,35 @@ fn notify(msg: &str) {
     std::thread::spawn(move || {
         let _ = Command::new("osascript").args(["-e", &script]).status();
     });
+}
+
+/// Linux desktop notification. Silently absent when notify-send is not installed.
+#[cfg(target_os = "linux")]
+fn notify(msg: &str) {
+    std::thread::spawn(move || {
+        let _ = Command::new("notify-send")
+            .args(["-a", "aimon", "aimon", msg])
+            .status();
+    });
+}
+
+/// Windows toast via PowerShell (WinRT from PS 5+). Single-quoted PS strings, so the only
+/// escaping needed is doubling the quotes inside `msg`.
+#[cfg(target_os = "windows")]
+fn notify(msg: &str) {
+    let script = format!(
+        r#"[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; $x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); $x.GetElementsByTagName('text').Item(0).AppendChild($x.CreateTextNode('aimon')) > $null; $x.GetElementsByTagName('text').Item(1).AppendChild($x.CreateTextNode('{}')) > $null; [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('aimon').Show([Windows.UI.Notifications.ToastNotification]::new($x))"#,
+        msg.replace('\'', "''")
+    );
+    std::thread::spawn(move || {
+        let _ = Command::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .status();
+    });
+}
+
+/// No toast mechanism known: the event bar and the log still carry every kill.
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn notify(msg: &str) {
+    let _ = msg;
 }

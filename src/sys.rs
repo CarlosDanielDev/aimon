@@ -1,9 +1,11 @@
-//! Reads the machine: processes of the current user, RAM, swap, the kernel's memory pressure
-//! level and which tmux session owns which pane. Only what the view needs is refreshed.
+//! Reads the machine: processes of the current user, RAM, swap, the OS memory-pressure
+//! signal and which tmux session owns which pane. Only what the view needs is refreshed.
+//! Pressure source per OS: macOS kernel level, Linux PSI, elsewhere always Normal.
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "macos")]
 use sysctl::Sysctl;
 use sysinfo::{
     MemoryRefreshKind, Pid, ProcessRefreshKind, ProcessesToUpdate, Signal, System, Uid, UpdateKind,
@@ -68,6 +70,7 @@ pub struct Sampler {
     tmux_at: Option<Instant>,
     /// pid -> (start time, capped lowercase cmdline). The cmdline never changes; only the pid can.
     cmds: HashMap<u32, (u64, String)>,
+    #[cfg(target_os = "macos")]
     pressure_ctl: Option<sysctl::Ctl>,
 }
 
@@ -80,6 +83,7 @@ impl Sampler {
             tmux: HashMap::new(),
             tmux_at: None,
             cmds: HashMap::new(),
+            #[cfg(target_os = "macos")]
             pressure_ctl: sysctl::Ctl::new("kern.memorystatus_vm_pressure_level").ok(),
         };
         s.refresh();
@@ -167,6 +171,8 @@ impl Sampler {
             .is_some_and(|p| p.start_time() == start)
     }
 
+    /// macOS: the cached `kern.memorystatus_vm_pressure_level` ctl, 1 normal, 2 warn, 4 critical.
+    #[cfg(target_os = "macos")]
     fn pressure(&self) -> Pressure {
         let level = self
             .pressure_ctl
@@ -180,6 +186,31 @@ impl Sampler {
             .unwrap_or(1);
         Pressure::from_level(level)
     }
+
+    /// Linux: PSI `some` avg10 from /proc/pressure/memory, in % of wall time stalled.
+    #[cfg(target_os = "linux")]
+    fn pressure(&self) -> Pressure {
+        let text = std::fs::read_to_string("/proc/pressure/memory").unwrap_or_default();
+        match parse_psi(&text) {
+            Some(p) if p >= 50.0 => Pressure::Critical,
+            Some(p) if p >= 10.0 => Pressure::Warn,
+            _ => Pressure::Normal,
+        }
+    }
+
+    /// No kernel pressure signal available (Windows and other OSes): never pressure-gate.
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    fn pressure(&self) -> Pressure {
+        Pressure::Normal
+    }
+}
+
+/// Extract the `some avg10` percentage from PSI text: "some avg10=1.23 avg60=…".
+#[cfg(target_os = "linux")]
+pub fn parse_psi(text: &str) -> Option<f32> {
+    let line = text.lines().find(|l| l.starts_with("some "))?;
+    let field = line.split_whitespace().find(|f| f.starts_with("avg10="))?;
+    field["avg10=".len()..].parse().ok()
 }
 
 const CMD_MAX: usize = 256;
