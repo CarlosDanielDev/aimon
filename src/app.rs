@@ -29,6 +29,7 @@ pub struct App {
     pub anchor: Option<(u32, u64)>,
     pub panic: Option<Panic>,
     pub rss_limit: u64,
+    pub auto_dev: bool,
     pub quit: bool,
 }
 
@@ -42,11 +43,11 @@ fn move_sel(sel: usize, len: usize, down: bool) -> usize {
 }
 
 impl App {
-    pub fn new(auto: bool, grace: Duration, rss_limit: u64) -> Self {
+    pub fn new(auto: bool, grace: Duration, rss_limit: u64, auto_dev: bool) -> Self {
         Self {
             theme: Theme::detect(),
             sampler: Sampler::new(),
-            actor: Actor::new(auto, grace),
+            actor: Actor::new(auto, grace, auto_dev),
             procs: Vec::new(),
             view: View::default(),
             mem: Mem::default(),
@@ -54,13 +55,14 @@ impl App {
             anchor: None,
             panic: None,
             rss_limit,
+            auto_dev,
             quit: false,
         }
     }
 
     pub fn tick(&mut self) {
         let (procs, mem) = self.sampler.sample();
-        self.view = classify::build(&procs, &self.sampler.tmux, self.rss_limit);
+        self.view = classify::build(&procs, &self.sampler.tmux, self.rss_limit, self.auto_dev);
         self.actor.tick(&self.sampler, &procs, &self.view, &mem);
         self.procs = procs;
         self.mem = mem;

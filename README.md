@@ -43,6 +43,7 @@ aimon --no-auto       # never kill on its own
 | `--rss-limit-mb N` | 500 | a dev child of an agent above this is a panic target |
 | `--orphan-grace-s N` | 60 | an orphaned tool worker is killed after N seconds |
 | `--tick-ms N` | 2000 | sampling interval (×2.5 when the terminal loses focus) |
+| `--auto-dev` | off | also auto-kill orphaned runtimes (`node`, `python`) — they may be daemons you meant to keep, so this is opt-in |
 
 Keys: `↑↓`/`jk` move · `x` kill selected · `X` kill the group's dev processes · `p` panic ·
 `a` toggle auto · `t` theme (neon/matrix) · `q` quit. `x`, `X` and `p` all open the same
@@ -66,6 +67,15 @@ under it. `NO_COLOR` is honored.
 
 Kills are SIGTERM, then SIGKILL 2 s later (Windows: TerminateProcess). Every kill sends a native
 notification and appends a line to `~/.local/state/aimon/kills.log`.
+
+## FAQ
+
+**Does it catch workers that get re-parented to launchd after the terminal closes?**
+Yes — that is rule A. Anything whose parent becomes launchd (PPID 1) lands in the ORPHANS
+group. `vitest`, `jest`, `tsserver`, `esbuild`, `playwright`, MCP and pytest workers are
+auto-killed after the grace period; jest worker pools (`jest-worker`/`processChild`) count
+too. Plain runtimes (`node`, `python`) are only swept with `--auto-dev`, since an orphaned
+dev server may be one you meant to keep.
 
 ## Develop
 

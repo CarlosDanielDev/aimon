@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sysinfo::Signal;
 
-use crate::classify::{Row, View};
+use crate::classify::{Kind, Row, View};
 use crate::sys::{Mem, Pressure, Proc, Sampler};
 use crate::theme::human;
 
@@ -36,6 +36,7 @@ struct Pending {
 
 pub struct Actor {
     pub auto: bool,
+    pub auto_dev: bool,
     grace: Duration,
     first_seen: HashMap<(u32, u64), Instant>,
     pending: Vec<Pending>,
@@ -47,13 +48,14 @@ pub struct Actor {
 }
 
 impl Actor {
-    pub fn new(auto: bool, grace: Duration) -> Self {
+    pub fn new(auto: bool, grace: Duration, auto_dev: bool) -> Self {
         let log = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/aimon"));
         if let Some(dir) = &log {
             let _ = std::fs::create_dir_all(dir);
         }
         Self {
             auto,
+            auto_dev,
             grace,
             first_seen: HashMap::new(),
             pending: Vec::new(),
@@ -91,7 +93,7 @@ impl Actor {
         }
         // Rule A orphans: exactly the rows the panic popup pre-marks. One collection drives both
         // the grace bookkeeping and the auto-kill list, so the two can never drift apart.
-        let orphans: Vec<&Row> = view.rows().filter(|r| r.is_orphan_tool()).collect();
+        let orphans: Vec<&Row> = view.rows().filter(|r| self.orphan_killable(r)).collect();
         let seen: HashSet<(u32, u64)> = orphans.iter().map(|r| (r.pid, r.start)).collect();
         self.first_seen.retain(|k, _| seen.contains(k));
         for k in &seen {
@@ -170,6 +172,12 @@ impl Actor {
         self.log_line(&msg);
         self.batch.push(msg.clone());
         self.note(msg);
+    }
+
+    /// What the grace-period reaper targets: orphaned tool workers always, orphaned runtimes
+    /// only when --auto-dev opted in.
+    fn orphan_killable(&self, r: &Row) -> bool {
+        r.is_orphan_tool() || (self.auto_dev && r.kind == Kind::Dev && r.orphan)
     }
 
     fn escalate(&mut self, s: &Sampler) {

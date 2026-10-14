@@ -15,9 +15,11 @@ use ratatui::crossterm::execute;
 
 const USAGE: &str = "aimon — AI process monitor
 
-usage: aimon [--daemon] [--no-auto] [--rss-limit-mb N] [--orphan-grace-s N] [--tick-ms N]
+usage: aimon [--daemon] [--no-auto] [--auto-dev] [--rss-limit-mb N] [--orphan-grace-s N] [--tick-ms N]
 
   --daemon           no TUI: auto-kill and alerts only
+  --auto-dev         auto-kill orphaned runtimes (node, python) too — off by
+                     default because they may be daemons you meant to keep
   --no-auto          never kills on its own
   --rss-limit-mb N   agent child above this becomes a panic target (500)
   --orphan-grace-s N orphaned worker is killed after N s (60)
@@ -32,6 +34,7 @@ enum CliError {
 struct Opts {
     daemon: bool,
     auto: bool,
+    auto_dev: bool,
     rss_limit: u64,
     grace: Duration,
     tick: Duration,
@@ -41,6 +44,7 @@ fn parse(args: &[String]) -> Result<Opts, CliError> {
     let mut o = Opts {
         daemon: false,
         auto: true,
+        auto_dev: false,
         rss_limit: 500 << 20,
         grace: Duration::from_secs(60),
         tick: Duration::from_millis(2000),
@@ -55,6 +59,7 @@ fn parse(args: &[String]) -> Result<Opts, CliError> {
         match a.as_str() {
             "--daemon" => o.daemon = true,
             "--no-auto" => o.auto = false,
+            "--auto-dev" => o.auto_dev = true,
             // A 0 here would mean "every child is a target"; a huge N must not shift-overflow.
             "--rss-limit-mb" => o.rss_limit = num(a)?.max(1).checked_shl(20).unwrap_or(u64::MAX),
             "--orphan-grace-s" => o.grace = Duration::from_secs(num(a)?.max(1)),
@@ -91,7 +96,7 @@ fn main() {
 }
 
 fn daemon(o: &Opts) -> io::Result<()> {
-    let mut app = app::App::new(o.auto, o.grace, o.rss_limit);
+    let mut app = app::App::new(o.auto, o.grace, o.rss_limit, o.auto_dev);
     loop {
         app.tick();
         while let Some(e) = app.actor.events.pop_back() {
@@ -102,7 +107,7 @@ fn daemon(o: &Opts) -> io::Result<()> {
 }
 
 fn tui(o: &Opts) -> io::Result<()> {
-    let mut app = app::App::new(o.auto, o.grace, o.rss_limit);
+    let mut app = app::App::new(o.auto, o.grace, o.rss_limit, o.auto_dev);
     let mut term = ratatui::init();
     let _ = execute!(io::stdout(), EnableFocusChange);
     let result = run(&mut term, &mut app, o.tick);

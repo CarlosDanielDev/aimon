@@ -12,6 +12,8 @@ const PROTECTED: &[&str] = &[
 const TOOLS: &[&str] = &[
     "vitest",
     "jest",
+    "jest-worker",
+    "processchild",
     "esbuild",
     "tsserver",
     "playwright",
@@ -57,6 +59,11 @@ impl Row {
     /// Rule A orphan half: an orphaned tool worker, auto-killed after the grace period.
     pub fn is_orphan_tool(&self) -> bool {
         self.orphan && self.kind == Kind::Tool
+    }
+
+    /// An orphaned runtime (node, python, …): a daemon candidate, killed only under --auto-dev.
+    pub fn is_orphan_runtime(&self) -> bool {
+        self.orphan && self.kind == Kind::Dev
     }
 }
 
@@ -210,6 +217,7 @@ fn label(agent: Option<&'static str>, kind: Kind, p: &Proc) -> String {
 
 struct Tree<'a> {
     procs: &'a [Proc],
+    auto_dev: bool,
     kinds: Vec<Kind>,
     agents: Vec<Option<&'static str>>,
     children: HashMap<u32, Vec<usize>>,
@@ -220,7 +228,7 @@ struct Tree<'a> {
 }
 
 impl<'a> Tree<'a> {
-    fn new(procs: &'a [Proc], rss_limit: u64) -> Self {
+    fn new(procs: &'a [Proc], rss_limit: u64, auto_dev: bool) -> Self {
         let mut children: HashMap<u32, Vec<usize>> = HashMap::new();
         for (i, p) in procs.iter().enumerate() {
             children.entry(p.ppid).or_default().push(i);
@@ -235,6 +243,7 @@ impl<'a> Tree<'a> {
             .collect();
         let mut t = Self {
             procs,
+            auto_dev,
             kinds,
             agents,
             children,
@@ -295,8 +304,8 @@ impl<'a> Tree<'a> {
             subtree: self.total[i],
             why: None,
         };
-        // An orphaned runtime (python, node) may be a daemon on purpose: shown, never pre-marked.
-        row.why = if row.is_orphan_tool() {
+        // Orphaned runtimes may be daemons on purpose: only pre-marked when --auto-dev opted in.
+        row.why = if row.is_orphan_tool() || (self.auto_dev && row.is_orphan_runtime()) {
             Some("orphan")
         } else if kind.is_dev() && over {
             Some("heavy agent child")
@@ -320,8 +329,8 @@ fn group(title: String, orphans: bool, rows: Vec<Row>) -> Option<Group> {
 }
 
 /// `tmux`: pane pid -> session name.
-pub fn build(procs: &[Proc], tmux: &HashMap<u32, String>, rss_limit: u64) -> View {
-    let mut t = Tree::new(procs, rss_limit);
+pub fn build(procs: &[Proc], tmux: &HashMap<u32, String>, rss_limit: u64, auto_dev: bool) -> View {
+    let mut t = Tree::new(procs, rss_limit, auto_dev);
     let index: HashMap<u32, usize> = procs.iter().enumerate().map(|(i, p)| (p.pid, i)).collect();
     let mut groups = Vec::new();
 
@@ -476,7 +485,7 @@ mod tests {
     #[test]
     fn orphans_first_and_marked() {
         let (procs, tmux) = sample();
-        let v = build(&procs, &tmux, 500 * MB);
+        let v = build(&procs, &tmux, 500 * MB, false);
         let first = &v.groups[0];
         assert!(first.orphans);
         assert_eq!(first.rss(), 1500 * MB);
@@ -495,7 +504,7 @@ mod tests {
     #[test]
     fn heavy_claude_child_is_target_light_is_not() {
         let (procs, tmux) = sample();
-        let v = build(&procs, &tmux, 500 * MB);
+        let v = build(&procs, &tmux, 500 * MB, false);
         let tm = v
             .groups
             .iter()
@@ -520,7 +529,7 @@ mod tests {
     #[test]
     fn protected_never_target() {
         let (procs, tmux) = sample();
-        let v = build(&procs, &tmux, 0);
+        let v = build(&procs, &tmux, 0, false);
         assert!(
             v.rows()
                 .filter(|r| r.kind == Kind::Protected)
@@ -530,9 +539,23 @@ mod tests {
     }
 
     #[test]
+    fn auto_dev_opts_orphan_runtimes_in() {
+        let (procs, tmux) = sample();
+        // default: an orphaned `node server.js` is shown but never pre-marked
+        let safe = build(&procs, &tmux, 500 * MB, false);
+        assert_eq!(safe.rows().find(|r| r.pid == 60).unwrap().why, None);
+        // --auto-dev: it becomes a rule-A target
+        let aggressive = build(&procs, &tmux, 500 * MB, true);
+        assert_eq!(
+            aggressive.rows().find(|r| r.pid == 60).unwrap().why,
+            Some("orphan")
+        );
+    }
+
+    #[test]
     fn claude_outside_tmux_grouped() {
         let (procs, tmux) = sample();
-        let v = build(&procs, &tmux, 500 * MB);
+        let v = build(&procs, &tmux, 500 * MB, false);
         assert!(
             v.groups
                 .iter()
@@ -543,7 +566,7 @@ mod tests {
     #[test]
     fn flat_index_mapping() {
         let (procs, tmux) = sample();
-        let v = build(&procs, &tmux, 500 * MB);
+        let v = build(&procs, &tmux, 500 * MB, false);
         // locate() and line_of() agree with the flat order rows() yields: every group costs
         // one header line, every row one line.
         let mut expect_line = 1;
