@@ -271,6 +271,36 @@ def draw(t: float) -> Grid:
     return g
 
 
+def draw_icon() -> Grid:
+    """App icon: just the creature's head, way simpler than the mascot. Reads at 16px."""
+    g = Grid()
+    # ears
+    for x0, x1, yy in [(10, 14, 4), (10, 15, 5), (9, 16, 6), (9, 17, 7), (9, 18, 8), (9, 19, 9)]:
+        g.rect(x0, yy, x1, yy, OUT)
+        g.rect(x0 + 1, yy, x1 - 1, yy, BODY)
+    g.rect(11, 5, 11, 9, PINK_L)
+    for x0, x1, yy in [(33, 37, 4), (32, 38, 5), (31, 39, 6), (31, 40, 7), (31, 41, 8), (31, 42, 9)]:
+        g.rect(x0, yy, x1, yy, OUT)
+        g.rect(x0 + 1, yy, x1 - 1, yy, BODY)
+    g.rect(38, 5, 38, 9, PINK_L)
+    # head ball
+    g.ball(24, 26, 17, BODY, shade=BODY_D, light=BODY_L)
+    # eyes: big, sparkly
+    for ex in (14, 27):
+        g.ellipse(ex + 2, 25, 3, 5, WHITE)
+        g.ellipse(ex + 2, 26, 2, 3, ACCENT)
+        g.put(ex + 2, 27, INK)
+        g.put(ex + 1, 23, WHITE)
+    # smile + gems
+    g.rect(21, 34, 27, 34, INK)
+    g.put(21, 33, INK)
+    g.put(27, 33, INK)
+    g.put(23, 35, WHITE)
+    g.rect(6, 32, 7, 33, ACCENT)
+    g.rect(40, 32, 41, 33, ACCENT)
+    return g
+
+
 def rounded_bg(size: int, radius: int) -> Image.Image:
     from PIL import ImageDraw
 
@@ -347,7 +377,14 @@ def main() -> None:
     )
     frames[int(0.15 * FRAMES)].convert("RGB").save(out / "mascot-512.png", optimize=True)
     (out / "mascot.svg").write_text(svg_frame())
-    print(f"{gif.name}: {gif.stat().st_size / 1024:.0f} KB, {FRAMES} frames @ {FPS} fps")
+
+    # app icon: creature head, bigger grid share, on the same rounded canvas
+    canvas = rounded_bg(512, 96)
+    sprite = draw_icon().to_image().resize((GRID * SCALE, GRID * SCALE), Image.NEAREST)
+    canvas.alpha_composite(sprite, (16, 16))
+    canvas.convert("RGB").save(out / "icon-512.png", optimize=True)
+    canvas.resize((32, 32), Image.LANCZOS).save(out / "icon-32.png", optimize=True)
+    print("icon-512.png, icon-32.png")
 
 
 if __name__ == "__main__":
