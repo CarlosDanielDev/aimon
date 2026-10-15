@@ -224,13 +224,41 @@ fn kind_of(name: &str, cmd: &str, agent: Option<&'static str>) -> Kind {
 
 fn label(agent: Option<&'static str>, kind: Kind, p: &Proc) -> String {
     let name = agent.unwrap_or(p.name.as_str());
-    match (kind == Kind::Tool)
+    let text = match (kind == Kind::Tool)
         .then(|| tool_match(&p.name, &p.cmd))
         .flatten()
     {
         Some(t) if !name.contains(t) => format!("{name} ({t})"),
         _ => name.to_string(),
-    }
+    };
+    plain(&text)
+}
+
+/// Rendered-text invariant for anything derived from process argv or tmux names (both are
+/// attacker-controllable on a shared machine): control characters and invisible format
+/// characters (bidi overrides, zero-width, BOM) become spaces — they would otherwise forge
+/// log lines, corrupt ratatui cells, or spoof rendered output. Applied once at the display
+/// funnel (`label` and group titles), never at classification input: stripping there would
+/// change matching semantics and could make a hostile process look Protected.
+pub fn plain(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_control()
+                || matches!(
+                    c,
+                    '\u{200B}'..='\u{200F}'
+                        | '\u{202A}'..='\u{202E}'
+                        | '\u{2060}'..='\u{2064}'
+                        | '\u{2066}'..='\u{2069}'
+                        | '\u{FEFF}'
+                )
+            {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 struct Tree<'a> {
@@ -401,7 +429,7 @@ pub fn build(procs: &[Proc], tmux: &HashMap<u32, String>, rss_limit: u64, auto_d
         for i in panes {
             t.walk(i, 0, false, false, &mut rows);
         }
-        tail.extend(group(format!("tmux:{name}"), false, rows));
+        tail.extend(group(format!("tmux:{}", plain(name)), false, rows));
     }
 
     let mut rows = Vec::new();
@@ -546,6 +574,34 @@ mod tests {
                 || v.groups[0].rows.is_empty()
                 || v.locate(0).unwrap().0.title != v.groups[0].title
         );
+    }
+
+    // security: rendered text derived from argv must carry no invisible or control characters
+    #[test]
+    fn plain_neutralizes_control_and_invisible_characters() {
+        assert_eq!(plain("claude"), "claude");
+        assert_eq!(plain("hide\nFAKE"), "hide FAKE");
+        assert_eq!(plain("col\tA"), "col A");
+        assert_eq!(
+            plain("a\u{202E}cod\u{200B}"),
+            "a cod ",
+            "bidi + zero-width become spaces"
+        );
+        assert_eq!(plain("\u{FEFF}bom"), "bom");
+    }
+
+    #[test]
+    fn labels_from_hostile_argv_arrive_clean() {
+        let p = Proc {
+            pid: 1,
+            ppid: 0,
+            name: "evil\u{202E}".into(),
+            cmd: "evil\u{202E} --x".into(),
+            rss: 0,
+            cpu: 0.0,
+            start: 0,
+        };
+        assert!(!label(None, Kind::Other, &p).contains('\u{202E}'));
     }
 
     #[test]
