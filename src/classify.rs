@@ -587,7 +587,11 @@ mod tests {
             "a cod ",
             "bidi + zero-width become spaces"
         );
-        assert_eq!(plain("\u{FEFF}bom"), "bom");
+        assert_eq!(
+            plain("\u{FEFF}bom"),
+            " bom",
+            "BOM becomes a space, no trim: caller formats"
+        );
     }
 
     #[test]
