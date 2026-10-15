@@ -25,6 +25,7 @@ pub fn row(pid: u32, kind: Kind, orphan: bool, rss_mb: u64, why: Option<&'static
         orphan,
         subtree: rss_mb << 20,
         why,
+        workers: 0,
     }
 }
 
@@ -34,6 +35,7 @@ pub fn view(rows: Vec<Row>) -> View {
         groups: vec![Group {
             title: "ORPHANS".into(),
             orphans: true,
+            open: true,
             rows,
         }],
     }
@@ -85,6 +87,7 @@ pub fn app(view: View, panic: Option<crate::app::Panic>) -> App {
         panic,
         rss_limit: 500 << 20,
         auto_dev: false,
+        open_map: std::collections::HashMap::new(),
         quit: false,
     }
 }

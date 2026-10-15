@@ -1,4 +1,5 @@
 //! TUI state and keys. Sampling and killing live in `sys`/`act`; this file only routes.
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
@@ -30,6 +31,8 @@ pub struct App {
     pub panic: Option<Panic>,
     pub rss_limit: u64,
     pub auto_dev: bool,
+    /// Collapse state per group title, surviving the per-tick rebuild of the view.
+    pub open_map: HashMap<String, bool>,
     pub quit: bool,
 }
 
@@ -55,6 +58,7 @@ fn move_sel(sel: usize, len: usize, down: bool) -> usize {
 }
 
 impl App {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(auto: bool, grace: Duration, rss_limit: u64, auto_dev: bool) -> Self {
         Self {
             theme: Theme::detect(),
@@ -68,6 +72,7 @@ impl App {
             panic: None,
             rss_limit,
             auto_dev,
+            open_map: HashMap::new(),
             quit: false,
         }
     }
@@ -79,6 +84,9 @@ impl App {
             .tick(&self.sampler, &procs, &self.view, &mem, Instant::now());
         self.procs = procs;
         self.mem = mem;
+        for gr in &mut self.view.groups {
+            gr.open = self.open_map.get(&gr.title).copied().unwrap_or(true);
+        }
         let anchor = self.anchor.take();
         self.sel = repinned(&self.view, self.sel, anchor);
         self.anchor = anchor.filter(|_| {
@@ -94,6 +102,58 @@ impl App {
 
     fn step(&mut self, down: bool) {
         self.sel = move_sel(self.sel, self.view.rows().count(), down);
+        self.anchor = self.selected().map(|r| (r.pid, r.start));
+    }
+
+    /// Fold/unfold the group under the cursor; the cursor lands on the next visible row.
+    fn toggle_group(&mut self) {
+        let mut seen = 0usize;
+        let mut target: Option<String> = None;
+        for gr in &self.view.groups {
+            if gr.open && seen + gr.rows.len() > self.sel {
+                target = Some(gr.title.clone());
+                break;
+            }
+            seen += gr.rows.len();
+        }
+        let Some(title) = target else { return };
+        let open = self.open_map.get(&title).copied().unwrap_or(true);
+        self.open_map.insert(title.clone(), !open);
+        // apply to the live view too, so the fold is visible this frame, not next tick
+        for gr in &mut self.view.groups {
+            if gr.title == title {
+                gr.open = !open;
+            }
+        }
+        let n = self.view.rows().count();
+        self.sel = self.sel.min(n.saturating_sub(1));
+        self.anchor = self.selected().map(|r| (r.pid, r.start));
+    }
+
+    /// Unfold every group — folded ones are unreachable by the cursor until then.
+    fn unfold_all(&mut self) {
+        for gr in &mut self.view.groups {
+            gr.open = true;
+        }
+        self.open_map.clear();
+    }
+
+    /// Jump to the first row of the next (or previous) open group.
+    fn jump_group(&mut self, dir: i32) {
+        let mut starts: Vec<usize> = Vec::new();
+        let mut at = 0usize;
+        for gr in &self.view.groups {
+            if gr.open && !gr.rows.is_empty() {
+                starts.push(at);
+                at += gr.rows.len();
+            }
+        }
+        if starts.is_empty() {
+            return;
+        }
+        let current = starts.partition_point(|&s| s <= self.sel).saturating_sub(1);
+        let next = (current as i32 + dir).rem_euclid(starts.len() as i32) as usize;
+        self.sel = starts[next];
         self.anchor = self.selected().map(|r| (r.pid, r.start));
     }
 
@@ -119,6 +179,10 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => self.step(true),
             KeyCode::Up | KeyCode::Char('k') => self.step(false),
             KeyCode::Char('t') => self.theme = self.theme.switched(),
+            KeyCode::Char('o') => self.toggle_group(),
+            KeyCode::Char('O') => self.unfold_all(),
+            KeyCode::Tab => self.jump_group(1),
+            KeyCode::BackTab => self.jump_group(-1),
             KeyCode::Char('a') => {
                 self.actor.auto = !self.actor.auto;
                 let on = if self.actor.auto { "on" } else { "off" };
@@ -214,6 +278,7 @@ mod tests {
             } else {
                 None
             },
+            workers: 0,
         }
     }
 
@@ -222,6 +287,7 @@ mod tests {
             groups: vec![Group {
                 title: "g".into(),
                 orphans: false,
+                open: true,
                 rows,
             }],
         }
@@ -230,8 +296,8 @@ mod tests {
     fn app(view: View) -> App {
         App {
             theme: Theme::detect(),
-            sampler: Sampler::new(),
-            actor: Actor::new(true, Duration::from_secs(60), false),
+            sampler: Sampler::cold(),
+            actor: Actor::cold(true, Duration::from_secs(60), false),
             procs: vec![],
             view,
             mem: Mem::default(),
@@ -240,6 +306,7 @@ mod tests {
             panic: None,
             rss_limit: 500 << 20,
             auto_dev: false,
+            open_map: HashMap::new(),
             quit: false,
         }
     }
@@ -365,6 +432,44 @@ mod tests {
         a.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(a.panic.is_none());
         assert!(a.actor.events.is_empty(), "cancel kills nothing");
+    }
+
+    #[test]
+    fn tab_jumps_between_group_starts_and_o_folds() {
+        let groups = vec![
+            Group {
+                title: "a".into(),
+                orphans: false,
+                open: true,
+                rows: vec![row(50, Kind::Tool, true), row(51, Kind::Tool, true)],
+            },
+            Group {
+                title: "b".into(),
+                orphans: false,
+                open: true,
+                rows: vec![row(60, Kind::Dev, false)],
+            },
+        ];
+        let mut a = app(View { groups });
+        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(a.sel, 2, "jumped to first row of group b");
+        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(a.sel, 0, "wraps to group a");
+        a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+        assert_eq!(a.sel, 2, "back jumps to b");
+
+        a.sel = 2;
+        a.key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE));
+        assert_eq!(a.open_map.get("b"), Some(&false), "folded");
+        assert_eq!(
+            a.view.rows().count(),
+            2,
+            "closed rows hidden from consumers"
+        );
+        assert_eq!(a.sel, 1, "cursor clamped into the surviving rows");
+        a.key(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::NONE));
+        assert_eq!(a.open_map.get("b"), None, "unfold all clears overrides");
+        assert_eq!(a.view.rows().count(), 3);
     }
 
     #[test]

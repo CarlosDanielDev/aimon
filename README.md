@@ -45,8 +45,10 @@ aimon --no-auto       # never kill on its own
 | `--tick-ms N` | 2000 | sampling interval (×2.5 when the terminal loses focus) |
 | `--auto-dev` | off | also auto-kill orphaned runtimes (`node`, `python`) — they may be daemons you meant to keep, so this is opt-in |
 
-Keys: `↑↓`/`jk` move · `x` kill selected · `X` kill the group's dev processes · `p` panic ·
-`a` toggle auto · `t` theme (neon/matrix) · `q` quit. `x`, `X` and `p` all open the same
+Keys: `↑↓`/`jk` move · `tab` jump between groups · `o` fold/unfold the group under the
+cursor · `O` unfold all · `x` kill selected · `X` kill the group's dev processes · `p` panic ·
+`a` toggle auto · `t` theme (neon/matrix) · `q` quit. Shell chains (`fish → fish → …`) are
+hidden — agents hoist to their real depth with a `+N` worker count. `x`, `X` and `p` all open the same
 confirm popup: rows arrive pre-marked, `space` toggles, `enter` fires, `esc` cancels. The
 cursor follows its process when the list re-sorts, so it never kills the row that moved
 under it. `NO_COLOR` is honored.

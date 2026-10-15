@@ -4,6 +4,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::sys::Proc;
 
+/// Shell noise: hidden from the tree (children hoist up), since eight identical
+/// fish→fish→claude chains bury the agents users actually hunt for.
+const SHELLS: &[&str] = &["fish", "zsh", "bash", "sh", "login", "pwsh", "powershell"];
 /// Never a target, whatever else matches.
 const PROTECTED: &[&str] = &[
     "tmux", "fish", "zsh", "bash", "sh", "nvim", "vim", "iterm2", "login", "aimon",
@@ -53,6 +56,8 @@ pub struct Row {
     pub subtree: u64,
     /// Rule A: why this row is pre-marked in the panic popup, if it is.
     pub why: Option<&'static str>,
+    /// Descendants under this row (agent rows show "+N" for their worker pool).
+    pub workers: u32,
 }
 
 impl Row {
@@ -71,6 +76,8 @@ impl Row {
 pub struct Group {
     pub title: String,
     pub orphans: bool,
+    /// Collapsible: closed groups hide their rows from every consumer of `rows()`.
+    pub open: bool,
     pub rows: Vec<Row>,
 }
 
@@ -88,7 +95,10 @@ pub struct View {
 
 impl View {
     pub fn rows(&self) -> impl Iterator<Item = &Row> {
-        self.groups.iter().flat_map(|g| g.rows.iter())
+        self.groups
+            .iter()
+            .filter(|g| g.open)
+            .flat_map(|g| g.rows.iter())
     }
 
     pub fn targets(&self) -> Vec<Row> {
@@ -96,9 +106,13 @@ impl View {
     }
 
     /// The group holding flat row `i` (the order `rows()` yields), and the row's index in it.
+    /// Closed groups hold no visible rows and are skipped, matching `rows()`.
     pub fn locate(&self, i: usize) -> Option<(&Group, usize)> {
         let mut seen = 0;
         for g in &self.groups {
+            if !g.open {
+                continue;
+            }
             if seen + g.rows.len() > i {
                 return Some((g, i - seen));
             }
@@ -107,10 +121,14 @@ impl View {
         None
     }
 
-    /// Screen lines printed above flat row `i`: one header per group plus the rows before it.
+    /// Screen lines printed above flat row `i`: one header per open group plus the rows
+    /// before it, matching the renderer and `rows()`.
     pub fn line_of(&self, i: usize) -> usize {
         let (mut lines, mut seen) = (0, 0);
         for g in &self.groups {
+            if !g.open {
+                continue;
+            }
             if seen + g.rows.len() > i {
                 return lines + 1 + (i - seen);
             }
@@ -223,6 +241,8 @@ struct Tree<'a> {
     children: HashMap<u32, Vec<usize>>,
     total: Vec<u64>,
     done: Vec<bool>,
+    desc: Vec<u32>,
+    desc_done: Vec<bool>,
     seen: HashSet<usize>,
     rss_limit: u64,
 }
@@ -249,16 +269,36 @@ impl<'a> Tree<'a> {
             children,
             total: vec![0; procs.len()],
             done: vec![false; procs.len()],
+            desc: vec![0; procs.len()],
+            desc_done: vec![false; procs.len()],
             seen: HashSet::new(),
             rss_limit,
         };
         for i in 0..procs.len() {
             t.subtree_rss(i, 0);
+            t.descendants(i, 0);
         }
         for list in t.children.values_mut() {
             list.sort_by(|a, b| t.total[*b].cmp(&t.total[*a]));
         }
         t
+    }
+
+    /// Number of descendants under node `i` (worker-pool size for agent rows).
+    fn descendants(&mut self, i: usize, guard: usize) -> u32 {
+        if self.desc_done[i] || guard > 64 {
+            return self.desc[i];
+        }
+        let pid = self.procs[i].pid;
+        let mut n = 0u32;
+        for k in self.children.get(&pid).cloned().unwrap_or_default() {
+            if k != i {
+                n += 1 + self.descendants(k, guard + 1);
+            }
+        }
+        self.desc[i] = n;
+        self.desc_done[i] = true;
+        n
     }
 
     fn subtree_rss(&mut self, i: usize, guard: usize) -> u64 {
@@ -292,30 +332,35 @@ impl<'a> Tree<'a> {
         let p = &self.procs[i];
         let kind = self.kinds[i];
         let over = under_agent && p.rss > self.rss_limit;
-        let mut row = Row {
-            pid: p.pid,
-            start: p.start,
-            depth,
-            label: label(self.agents[i], kind, p),
-            rss: p.rss,
-            cpu: p.cpu,
-            kind,
-            orphan: orphan_root,
-            subtree: self.total[i],
-            why: None,
-        };
-        // Orphaned runtimes may be daemons on purpose: only pre-marked when --auto-dev opted in.
-        row.why = if row.is_orphan_tool() || (self.auto_dev && row.is_orphan_runtime()) {
-            Some("orphan")
-        } else if kind.is_dev() && over {
-            Some("heavy agent child")
-        } else {
-            None
-        };
-        out.push(row);
+        let is_shell = self.agents[i].is_none() && SHELLS.contains(&p.name.to_lowercase().as_str());
+        if !is_shell {
+            let mut row = Row {
+                pid: p.pid,
+                start: p.start,
+                depth,
+                label: label(self.agents[i], kind, p),
+                rss: p.rss,
+                cpu: p.cpu,
+                kind,
+                orphan: orphan_root,
+                subtree: self.total[i],
+                why: None,
+                workers: self.desc[i],
+            };
+            // Orphaned runtimes may be daemons on purpose: only pre-marked when --auto-dev opted in.
+            row.why = if row.is_orphan_tool() || (self.auto_dev && row.is_orphan_runtime()) {
+                Some("orphan")
+            } else if kind.is_dev() && over {
+                Some("heavy agent child")
+            } else {
+                None
+            };
+            out.push(row);
+        }
         let agent_here = under_agent || self.agents[i].is_some();
+        let child_depth = if is_shell { depth } else { depth + 1 };
         for k in self.children.get(&p.pid).cloned().unwrap_or_default() {
-            self.walk(k, depth + 1, agent_here, false, out);
+            self.walk(k, child_depth, agent_here, false, out);
         }
     }
 }
@@ -324,6 +369,7 @@ fn group(title: String, orphans: bool, rows: Vec<Row>) -> Option<Group> {
     (!rows.is_empty()).then_some(Group {
         title,
         orphans,
+        open: true,
         rows,
     })
 }
@@ -459,6 +505,47 @@ mod tests {
             Kind::Tool
         );
         assert_eq!(kind("processChild", "processChild"), Kind::Tool);
+    }
+
+    // regression: shell chains buried the agents — shells are hidden and their children
+    // hoist up one depth level per skipped shell.
+    #[test]
+    fn shell_chains_collapse_onto_the_agent() {
+        let (procs, tmux) = sample();
+        let v = build(&procs, &tmux, 500 * MB, false);
+        let tm = v
+            .groups
+            .iter()
+            .find(|g| g.title == "tmux:projects")
+            .expect("tmux group");
+        assert!(
+            tm.rows.iter().all(|r| r.label != "fish"),
+            "shells are not rendered"
+        );
+        let claude = tm
+            .rows
+            .iter()
+            .find(|r| r.label == "claude")
+            .expect("agent shown");
+        assert_eq!(
+            claude.depth, 0,
+            "hoisted: two shells skipped, no depth drift"
+        );
+        assert_eq!(claude.workers, 2, "direct children counted");
+    }
+
+    #[test]
+    fn closed_groups_hide_rows_from_every_consumer() {
+        let (procs, tmux) = sample();
+        let mut v = build(&procs, &tmux, 500 * MB, false);
+        let full = v.rows().count();
+        v.groups[0].open = false;
+        assert_eq!(v.rows().count(), full - v.groups[0].rows.len());
+        assert!(
+            v.locate(0).is_none()
+                || v.groups[0].rows.is_empty()
+                || v.locate(0).unwrap().0.title != v.groups[0].title
+        );
     }
 
     #[test]

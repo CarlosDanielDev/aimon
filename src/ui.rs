@@ -45,7 +45,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     );
     f.render_widget(
         Paragraph::new(Span::styled(
-            " ↑↓ navigate · x kill · X kill group · p panic · a auto · t theme · q quit",
+            " ↑↓ navigate · tab group · o fold · O unfold · x kill · X group · p panic · a auto · t theme · q quit",
             th.muted(),
         )),
         keys,
@@ -144,7 +144,11 @@ fn row_line(th: &Theme, r: &Row, width: usize, selected: bool) -> Line<'static> 
     };
     let indent = "  ".repeat(r.depth.min(8));
     let name_w = width.saturating_sub(indent.len() + 28).max(8);
-    let label: String = r.label.chars().take(name_w).collect();
+    let mut label = r.label.clone();
+    if r.workers > 0 {
+        label = format!("{label} +{}", r.workers);
+    }
+    let label: String = label.chars().take(name_w).collect();
     let mut line = Line::from(vec![
         Span::raw(format!(" {indent}")),
         Span::styled(format!("{glyph} "), th.fg(color)),
@@ -161,8 +165,10 @@ fn row_line(th: &Theme, r: &Row, width: usize, selected: bool) -> Line<'static> 
 
 fn group_line(th: &Theme, g: &Group) -> Line<'static> {
     let color = if g.orphans { th.bad } else { th.accent };
+    let fold = if g.open { "▾" } else { "▸" };
     Line::from(vec![
-        Span::styled(format!(" ▌{} ", g.title), th.bold(color)),
+        Span::styled(format!(" {fold} "), th.muted()),
+        Span::styled(format!("{} ", g.title), th.bold(color)),
         Span::styled(
             format!("{} · {} procs", human(g.rss()), g.rows.len()),
             th.muted(),
