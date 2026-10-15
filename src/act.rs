@@ -232,8 +232,14 @@ impl Actor {
         let secs = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
+        // Receipts embed process labels, and labels come from attacker-controlled argv:
+        // strip control characters so a crafted cmdline cannot forge log entries.
+        let clean: String = msg
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect();
         if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
-            let _ = writeln!(f, "{secs}\t{msg}");
+            let _ = writeln!(f, "{secs}\t{clean}");
         }
     }
 }
@@ -278,11 +284,24 @@ fn banner(batch: &[String]) -> Option<String> {
 fn notify(msg: &str) {
     let script = format!(
         "display notification \"{}\" with title \"aimon\"",
-        msg.replace(['"', '\\'], "'")
+        apple_script_string(msg)
     );
     std::thread::spawn(move || {
         let _ = Command::new("osascript").args(["-e", &script]).status();
     });
+}
+
+/// Escape for an AppleScript double-quoted string: backslash and quote are the only
+/// metacharacters, and both are replaced — labels come from attacker-controlled argv.
+#[cfg(any(target_os = "macos", test))]
+fn apple_script_string(s: &str) -> String {
+    s.replace(['"', '\\'], "'")
+}
+
+/// Escape for a PowerShell single-quoted string: the only metacharacter is the quote.
+#[cfg(any(target_os = "windows", test))]
+fn ps_single_quoted(s: &str) -> String {
+    s.replace('\'', "''")
 }
 
 /// Linux desktop notification. Silently absent when notify-send is not installed.
@@ -302,7 +321,7 @@ fn notify(msg: &str) {
 fn notify(msg: &str) {
     let script = format!(
         r#"[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; $x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); $x.GetElementsByTagName('text').Item(0).AppendChild($x.CreateTextNode('aimon')) > $null; $x.GetElementsByTagName('text').Item(1).AppendChild($x.CreateTextNode('{}')) > $null; [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('aimon').Show([Windows.UI.Notifications.ToastNotification]::new($x))"#,
-        msg.replace('\'', "''")
+        ps_single_quoted(msg)
     );
     std::thread::spawn(move || {
         let _ = Command::new("powershell")
@@ -326,6 +345,7 @@ fn notify(_msg: &str) {}
 mod tests {
     use super::*;
     use crate::fixtures::{self, GRACE};
+    use std::fs;
 
     fn events_of(a: &Actor) -> Vec<String> {
         a.events.iter().cloned().collect()
@@ -542,6 +562,41 @@ mod tests {
             events_of(&a).is_empty(),
             "dead pids reap silently — no phantom receipts"
         );
+    }
+
+    // security: labels come from attacker-controlled argv — quoting must not be breakable
+    #[test]
+    fn notification_escaping_neutralizes_metacharacters() {
+        let evil = r#"x" do shell script "rm -rf /"#;
+        let escaped = apple_script_string(evil);
+        assert!(!escaped.contains('"'), "no quotes survive: {escaped}");
+        assert!(!escaped.contains('\\'), "no backslashes survive: {escaped}");
+        assert_eq!(apple_script_string("plain"), "plain");
+
+        let evil_ps = "x'); shell('owned'); ('";
+        let escaped_ps = ps_single_quoted(evil_ps);
+        assert_eq!(
+            escaped_ps, "x''); shell(''owned''); (''",
+            "every quote doubled — the string never terminates: {escaped_ps}"
+        );
+    }
+
+    // security: control characters in receipts must not forge log entries
+    #[test]
+    fn log_lines_strip_control_characters() {
+        let mut a = fixtures::actor(true, false);
+        let path = std::env::temp_dir().join(format!(
+            "aimon-log-{}-{}",
+            std::process::id(),
+            a.events.len()
+        ));
+        a.log = Some(path.clone());
+        a.log_line("legit\t50 p50 (1M)\nFAKE entry: killed everything");
+        let written = fs::read_to_string(&path).unwrap_or_default();
+        let trimmed = written.trim_end();
+        assert!(trimmed.contains("legit 50 p50 (1M) FAKE entry: killed everything"));
+        assert!(!trimmed.contains('\n'), "single line only: {trimmed:?}");
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
