@@ -62,6 +62,7 @@ pub struct Mem {
     pub pressure: Pressure,
 }
 
+#[derive(Default)]
 pub struct Sampler {
     sys: System,
     uid: Option<Uid>,
@@ -75,6 +76,12 @@ pub struct Sampler {
 }
 
 impl Sampler {
+    /// Tests: no initial system walk — fake pids never match the real table anyway.
+    #[cfg(test)]
+    pub fn cold() -> Self {
+        Self::default()
+    }
+
     pub fn new() -> Self {
         let mut s = Self {
             sys: System::new(),
@@ -121,11 +128,9 @@ impl Sampler {
             .map(|p| {
                 let pid = p.pid().as_u32();
                 let start = p.start_time();
-                let cmd = match self.cmds.get(&pid) {
-                    // An empty cmdline (a fresh or zombie process) is not cached: sysinfo
-                    // retries it on a later tick, and so does the lookup here.
-                    Some((s, c)) if *s == start && !c.is_empty() => c.clone(),
-                    _ => {
+                let cmd = match reuse_cached(self.cmds.get(&pid), start) {
+                    Some(c) => c,
+                    None => {
                         let c = cmdline(p.cmd());
                         if !c.is_empty() {
                             self.cmds.insert(pid, (start, c.clone()));
@@ -215,6 +220,16 @@ pub fn parse_psi(text: &str) -> Option<f32> {
 
 const CMD_MAX: usize = 256;
 
+/// The cache decision for one pid: reuse only when the start time matches (no pid reuse)
+/// and the stored cmdline is non-empty — an empty one came from an unreadable argv and
+/// must be retried on a later tick. regression: empty cmdlines used to be cached forever.
+fn reuse_cached(cached: Option<&(u64, String)>, start: u64) -> Option<String> {
+    match cached {
+        Some((s, c)) if *s == start && !c.is_empty() => Some(c.clone()),
+        _ => None,
+    }
+}
+
 /// Lowercased args, capped. A process that retitles itself (`npm exec …`) makes the kernel
 /// hand back its environment as extra args, so everything from the first `KEY=value` is dropped.
 pub fn cmdline(args: &[std::ffi::OsString]) -> String {
@@ -263,6 +278,7 @@ mod tests {
     fn pressure_levels() {
         assert_eq!(Pressure::from_level(1), Pressure::Normal);
         assert_eq!(Pressure::from_level(2), Pressure::Warn);
+        assert_eq!(Pressure::from_level(3), Pressure::Warn);
         assert_eq!(Pressure::from_level(4), Pressure::Critical);
         assert_eq!(Pressure::Critical.label(), "CRITICAL");
     }
@@ -273,6 +289,42 @@ mod tests {
             .map(Into::into)
             .to_vec();
         assert_eq!(cmdline(&args), "npm exec x mcp");
+    }
+
+    // regression: an empty argv used to be cached forever, hiding the process from matching
+    #[test]
+    fn empty_cmdline_is_empty() {
+        assert_eq!(cmdline(&[]), "");
+    }
+
+    #[test]
+    fn cmdline_cache_skips_empty_and_stale_entries() {
+        use super::reuse_cached;
+        let cached = Some(&(1, "node x.js".to_string()));
+        assert_eq!(reuse_cached(cached, 1).as_deref(), Some("node x.js"));
+        assert_eq!(reuse_cached(cached, 2), None, "start mismatch: pid reuse");
+        assert_eq!(
+            reuse_cached(Some(&(1, String::new())), 1),
+            None,
+            "empty is retried"
+        );
+        assert_eq!(reuse_cached(None, 1), None);
+    }
+
+    #[test]
+    fn flag_values_are_not_env_vars() {
+        // "--foo=BAR" must survive: only KEY=value env shapes are dropped
+        let args: Vec<std::ffi::OsString> = ["node", "--foo=BAR"].map(Into::into).to_vec();
+        assert_eq!(cmdline(&args), "node --foo=bar");
+    }
+
+    #[test]
+    fn cmdline_truncates_at_char_boundary() {
+        let long = "a".repeat(400);
+        let args: Vec<std::ffi::OsString> = [long.as_str()].map(Into::into).to_vec();
+        let out = cmdline(&args);
+        assert!(out.len() <= 256);
+        assert!(out.chars().all(|c| c == 'a'));
     }
 
     #[test]

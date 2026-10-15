@@ -265,3 +265,74 @@ fn draw_panic(f: &mut Frame, th: &Theme, p: &Panic) {
         area,
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::Panic;
+    use crate::classify::Kind;
+    use crate::fixtures;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn app(panic: Option<Panic>) -> App {
+        fixtures::app(
+            fixtures::view(vec![
+                fixtures::row(50, Kind::Tool, true, 100, Some("orphan")),
+                fixtures::row(60, Kind::Dev, false, 100, None),
+            ]),
+            panic,
+        )
+    }
+
+    fn screen(a: &App) -> String {
+        let backend = TestBackend::new(100, 30);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| draw(f, a)).unwrap();
+        term.backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>()
+    }
+
+    #[test]
+    fn main_screen_renders_panels_and_rows() {
+        let s = screen(&app(None));
+        for needle in [
+            "aimon",
+            "ORPHANS",
+            "RAM",
+            "swap",
+            "pressure",
+            "processes",
+            "p50",
+            "p60",
+            "auto",
+        ] {
+            assert!(s.contains(needle), "missing {needle}");
+        }
+    }
+
+    #[test]
+    fn empty_view_shows_placeholder() {
+        let mut a = app(None);
+        a.view.groups.clear();
+        assert!(screen(&a).contains("no AI processes in sight"));
+    }
+
+    #[test]
+    fn panic_modal_renders_title_and_footer() {
+        let rows = vec![fixtures::row(50, Kind::Tool, true, 100, Some("orphan"))];
+        let p = Panic {
+            title: "KILL",
+            why: "manual",
+            items: rows.into_iter().map(|r| (r, true)).collect(),
+            sel: 0,
+        };
+        let s = screen(&app(Some(p)));
+        assert!(s.contains("KILL"));
+        assert!(s.contains("space toggles"), "footer hint: {s}");
+        assert!(s.contains("enter kills"));
+    }
+}

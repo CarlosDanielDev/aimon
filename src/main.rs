@@ -3,6 +3,8 @@
 mod act;
 mod app;
 mod classify;
+#[cfg(test)]
+mod fixtures;
 mod sys;
 mod theme;
 mod ui;
@@ -61,7 +63,7 @@ fn parse(args: &[String]) -> Result<Opts, CliError> {
             "--no-auto" => o.auto = false,
             "--auto-dev" => o.auto_dev = true,
             // A 0 here would mean "every child is a target"; a huge N must not shift-overflow.
-            "--rss-limit-mb" => o.rss_limit = num(a)?.max(1).checked_shl(20).unwrap_or(u64::MAX),
+            "--rss-limit-mb" => o.rss_limit = num(a)?.max(1).saturating_mul(1 << 20),
             "--orphan-grace-s" => o.grace = Duration::from_secs(num(a)?.max(1)),
             "--tick-ms" => o.tick = Duration::from_millis(num(a)?.max(250)),
             "-h" | "--help" => return Err(CliError::Help),
@@ -170,6 +172,23 @@ mod tests {
         let o = parse(&args("--rss-limit-mb 0 --orphan-grace-s 0")).expect("ok");
         assert_eq!(o.rss_limit, 1 << 20, "0 would target every child");
         assert_eq!(o.grace.as_secs(), 1, "0 would kill orphans instantly");
+    }
+
+    #[test]
+    fn auto_dev_flag_parses() {
+        let o = parse(&args("--auto-dev")).expect("ok");
+        assert!(o.auto_dev);
+        assert!(
+            !parse(&args("--daemon")).expect("ok").auto_dev,
+            "off by default"
+        );
+    }
+
+    // regression: a huge --rss-limit-mb used to shift-overflow
+    #[test]
+    fn huge_rss_limit_saturates() {
+        let o = parse(&args("--rss-limit-mb 99999999999999999")).expect("ok");
+        assert_eq!(o.rss_limit, u64::MAX);
     }
 
     #[test]

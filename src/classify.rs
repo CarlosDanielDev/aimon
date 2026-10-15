@@ -451,6 +451,28 @@ mod tests {
         );
     }
 
+    // regression: jest worker pools escaped the tool sweep (plain `node processChild.js`)
+    #[test]
+    fn jest_worker_pools_are_tools() {
+        assert_eq!(
+            kind("node", "node /x/jest-worker/processChild.js"),
+            Kind::Tool
+        );
+        assert_eq!(kind("processChild", "processChild"), Kind::Tool);
+    }
+
+    #[test]
+    fn agent_match_is_case_insensitive_on_name() {
+        assert_eq!(kind("Claude", "claude --model x"), Kind::Protected);
+    }
+
+    #[test]
+    fn empty_view_locates_nothing() {
+        let v = View::default();
+        assert!(v.locate(0).is_none());
+        assert_eq!(v.line_of(0), 0);
+    }
+
     #[test]
     fn agent_paths() {
         // Versioned install: matched by its directory segment, at any argv position.
