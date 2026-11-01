@@ -8,7 +8,7 @@ repository = "https://github.com/CarlosDanielDev/aimon"
 
 [dependencies]
 ratatui = "0.30"
-sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 sysctl = "0.7"
